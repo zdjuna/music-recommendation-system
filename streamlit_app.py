@@ -28,6 +28,14 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Import new features
+try:
+    from music_rec.analyzers.real_time_updater import StreamlitUpdater
+    from music_rec.exporters.multi_platform_exporter import StreamlitExportHelper
+    ENHANCED_FEATURES_AVAILABLE = True
+except ImportError:
+    ENHANCED_FEATURES_AVAILABLE = False
+
 # Custom CSS for beautiful styling
 st.markdown("""
 <style>
@@ -73,8 +81,29 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Configuration management
+def get_config_value(key: str, default: str = "") -> str:
+    """Get configuration value from Streamlit secrets or environment variables."""
+    try:
+        # Try Streamlit secrets first
+        return st.secrets[key]
+    except (KeyError, FileNotFoundError):
+        # Fall back to environment variables
+        return os.getenv(key, default)
+
+# Set default configuration values
+DEFAULT_CONFIG = {
+    'LASTFM_USERNAME': 'zdjuna',
+    'ROON_CORE_HOST': '192.168.1.213',
+    'ROON_CORE_PORT': '9330',
+    'MAX_TRACKS_PER_REQUEST': '200',
+    'DEFAULT_DISCOVERY_LEVEL': 'medium',
+    'LOG_LEVEL': 'INFO'
+}
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_user_data(username: str) -> Dict[str, Any]:
-    """Load user's music data and stats"""
+    """Load user's music data and stats with caching"""
     data_dir = Path('data')
     
     # Check for data files
@@ -103,11 +132,15 @@ def load_user_data(username: str) -> Dict[str, Any]:
                 result['stats'] = json.load(f)
     except Exception as e:
         st.error(f"Error loading data: {e}")
+        # Log the error for debugging
+        import logging
+        logging.error(f"Data loading error for {username}: {e}")
     
     return result
 
+@st.cache_data(ttl=600)  # Cache for 10 minutes
 def create_listening_timeline(df: pd.DataFrame) -> go.Figure:
-    """Create beautiful listening timeline chart"""
+    """Create beautiful listening timeline chart with caching"""
     if df is None or df.empty:
         return go.Figure()
     
@@ -199,102 +232,94 @@ def create_mood_distribution(df: pd.DataFrame) -> go.Figure:
 
 def show_dashboard():
     """Main dashboard page"""
+    
+    # Main header
     st.markdown("""
     <div class="main-header">
         <h1>🎵 Music Recommendation System</h1>
-        <p>AI-powered playlist generation using your Last.fm data</p>
+        <p>AI-powered insights into your musical journey</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # Sidebar configuration
-    st.sidebar.header("🔧 Configuration")
-    username = st.sidebar.text_input("Last.fm Username", value=os.getenv('LASTFM_USERNAME', 'TestUser'))
-    
-    if not username:
-        st.warning("⚠️ Please enter your Last.fm username in the sidebar")
-        return
+    # Initialize real-time features if available
+    username = get_config_value('LASTFM_USERNAME', 'TestUser')
+    if ENHANCED_FEATURES_AVAILABLE:
+        StreamlitUpdater.initialize_realtime_updates(username)
     
     # Load user data
-    with st.spinner("🔍 Loading your music data..."):
-        user_data = load_user_data(username)
+    user_data = load_user_data(username)
     
-    # Status indicators
-    col1, col2, col3 = st.columns(3)
+    # Real-time status (if available)
+    if ENHANCED_FEATURES_AVAILABLE:
+        st.subheader("⚡ Real-Time Status")
+        StreamlitUpdater.show_realtime_status()
+        st.markdown("---")
+    
+    # Quick stats overview
+    st.subheader("📊 Quick Overview")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    scrobbles_count = len(user_data['scrobbles']) if user_data['scrobbles'] is not None else 0
+    enriched_count = len(user_data['enriched']) if user_data['enriched'] is not None else 0
     
     with col1:
-        status = "✅ Ready" if user_data['has_scrobbles'] else "❌ Missing"
-        st.metric("Scrobbles Data", status)
-        
+        st.metric("Total Scrobbles", f"{scrobbles_count:,}")
+    
     with col2:
-        status = "✅ Ready" if user_data['has_enriched'] else "❌ Missing"
-        st.metric("Enriched Data", status)
-        
-    with col3:
-        status = "✅ Ready" if user_data['has_stats'] else "❌ Missing"
-        st.metric("Statistics", status)
-    
-    if not user_data['has_scrobbles']:
-        st.error("""
-        🚨 **No music data found!**
-        
-        Please run the following command first:
-        ```bash
-        python -m src.music_rec.cli fetch --username {username}
-        ```
-        """)
-        return
-    
-    # Main dashboard
-    if user_data['scrobbles'] is not None:
-        df = user_data['scrobbles']
-        
-        # Key metrics
-        st.subheader("📊 Your Music Statistics")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            total_tracks = len(df)
-            st.metric("Total Tracks", f"{total_tracks:,}")
-            
-        with col2:
-            unique_artists = df['artist'].nunique()
+        if user_data['scrobbles'] is not None:
+            unique_artists = user_data['scrobbles']['artist'].nunique()
             st.metric("Unique Artists", f"{unique_artists:,}")
-            
-        with col3:
-            unique_albums = df['album'].nunique()
-            st.metric("Unique Albums", f"{unique_albums:,}")
-            
-        with col4:
-            date_range = (pd.to_datetime(df['timestamp']).max() - pd.to_datetime(df['timestamp']).min()).days
-            st.metric("Days of Data", f"{date_range:,}")
+        else:
+            st.metric("Unique Artists", "N/A")
+    
+    with col3:
+        st.metric("Enriched Tracks", f"{enriched_count:,}")
+    
+    with col4:
+        if user_data['stats']:
+            listening_time = user_data['stats'].get('total_listening_time_days', 0)
+            st.metric("Days of Music", f"{listening_time:.1f}")
+        else:
+            st.metric("Days of Music", "N/A")
+    
+    # Show charts if data is available
+    if user_data['scrobbles'] is not None and not user_data['scrobbles'].empty:
         
-        # Charts
-        st.subheader("📈 Listening Insights")
-        
+        # Timeline and patterns
         col1, col2 = st.columns(2)
         
         with col1:
-            listening_timeline = create_listening_timeline(df)
-            st.plotly_chart(listening_timeline, use_container_width=True)
-            
-        with col2:
-            if user_data['has_enriched'] and user_data['enriched'] is not None:
-                mood_chart = create_mood_distribution(user_data['enriched'])
-                st.plotly_chart(mood_chart, use_container_width=True)
-            else:
-                st.info("🎨 **Mood analysis available after enrichment**\n\nRun enrichment to see mood distribution!")
+            with st.spinner("Creating listening timeline..."):
+                timeline_fig = create_listening_timeline(user_data['scrobbles'])
+                st.plotly_chart(timeline_fig, use_container_width=True)
         
-        # Top artists
-        st.subheader("🎤 Your Musical Universe")
-        top_artists_chart = create_top_artists_chart(df)
-        st.plotly_chart(top_artists_chart, use_container_width=True)
+        with col2:
+            with st.spinner("Analyzing top artists..."):
+                artists_fig = create_top_artists_chart(user_data['scrobbles'])
+                st.plotly_chart(artists_fig, use_container_width=True)
+        
+        # Mood distribution if available
+        if user_data['enriched'] is not None and not user_data['enriched'].empty:
+            mood_fig = create_mood_distribution(user_data['enriched'])
+            if mood_fig:
+                st.plotly_chart(mood_fig, use_container_width=True)
+        
+        # Recent listening activity
+        st.subheader("🎵 Recent Activity")
+        recent_tracks = user_data['scrobbles'].head(10)[['artist', 'track', 'timestamp']]
+        recent_tracks['timestamp'] = pd.to_datetime(recent_tracks['timestamp'])
+        recent_tracks['timestamp'] = recent_tracks['timestamp'].dt.strftime('%Y-%m-%d %H:%M')
+        st.dataframe(recent_tracks, use_container_width=True)
+        
+    else:
+        st.warning("📭 No scrobble data found. Check the Data Management page to fetch your Last.fm data!")
 
 def show_recommendations():
     """Recommendations page"""
     st.header("🎯 Generate Recommendations")
     
-    username = st.sidebar.text_input("Last.fm Username", value=os.getenv('LASTFM_USERNAME', 'TestUser'))
+    username = st.sidebar.text_input("Last.fm Username", value=get_config_value('LASTFM_USERNAME', 'TestUser'))
     
     if not username:
         st.warning("⚠️ Please enter your Last.fm username")
@@ -426,13 +451,14 @@ def show_recommendations():
                         )
                     
                     with col3:
-                        # M3U format
-                        m3u_content = "#EXTM3U\n"
+                        # Download as M3U playlist
+                        track_list = []
                         for track in result.tracks:
                             artist = track.get('artist', 'Unknown')
                             title = track.get('track', 'Unknown')
-                            m3u_content += f"#EXTINF:-1,{artist} - {title}\n"
-                            m3u_content += f"# {artist} - {title}\n"
+                            track_list.append(f"{artist} - {title}")
+                        
+                        m3u_content = "#EXTM3U\n" + "\n".join(track_list)
                         
                         st.download_button(
                             "🎵 Download M3U",
@@ -443,7 +469,16 @@ def show_recommendations():
                 
                 else:
                     st.error("❌ No recommendations generated. Try adjusting your parameters!")
+                
+                # Enhanced export functionality
+                if ENHANCED_FEATURES_AVAILABLE and 'result' in locals() and result:
+                    st.markdown("---")
+                    st.subheader("🚀 Enhanced Export Options")
                     
+                    # Create export interface
+                    default_name = f"{mood.title()} Vibes - {datetime.now().strftime('%B %Y')}" if mood else "My Recommendations"
+                    StreamlitExportHelper.show_export_interface(result.tracks, default_name)
+                        
             except Exception as e:
                 st.error(f"❌ Error generating recommendations: {e}")
 
@@ -453,7 +488,7 @@ def show_roon_integration():
     
     roon_host = st.sidebar.text_input(
         "Roon Core Host",
-        value=os.getenv('ROON_CORE_HOST', '192.168.1.100'),
+        value=get_config_value('ROON_CORE_HOST', '192.168.1.213'),
         help="IP address of your Roon Core"
     )
     
@@ -475,12 +510,12 @@ def show_roon_integration():
     with col1:
         if st.button("🔌 Test Roon Connection"):
             st.info("🔄 Testing connection to Roon Core...")
-            st.info(f"💡 In terminal, run: `python -m src.music_rec.cli roon-connect --core-host {roon_host}`")
+            st.info(f"💡 In terminal, run: `python -m music_rec.cli roon-connect --core-host {roon_host}`")
     
     with col2:
         if st.button("🏠 Show Zones"):
             st.info("🔄 Getting zone information...")
-            st.info(f"💡 In terminal, run: `python -m src.music_rec.cli roon-zones --core-host {roon_host}`")
+            st.info(f"💡 In terminal, run: `python -m music_rec.cli roon-zones --core-host {roon_host}`")
     
     # Quick playlist creation
     st.subheader("🎵 Quick Roon Playlist")
@@ -498,7 +533,7 @@ def show_roon_integration():
     
     if st.button("🎵 Create Roon Playlist"):
         cmd_parts = [
-            f"python -m src.music_rec.cli roon-playlist",
+            f"python -m music_rec.cli roon-playlist",
             f"--core-host {roon_host}"
         ]
         
@@ -518,7 +553,7 @@ def show_data_management():
     """Data management page"""
     st.header("📊 Data Management")
     
-    username = st.sidebar.text_input("Last.fm Username", value=os.getenv('LASTFM_USERNAME', 'TestUser'))
+    username = st.sidebar.text_input("Last.fm Username", value=get_config_value('LASTFM_USERNAME', 'TestUser'))
     
     # Data status
     st.subheader("📈 Data Status")
@@ -532,6 +567,59 @@ def show_data_management():
     
     st.dataframe(status_df, use_container_width=True)
     
+    # Cyanite.ai Integration
+    st.subheader("🎭 Cyanite.ai Mood Analysis")
+    
+    # Check if Cyanite is configured
+    cyanite_key = get_config_value('CYANITE_API_KEY')
+    if not cyanite_key or cyanite_key == 'your_cyanite_api_key_here':
+        st.warning("⚠️ Cyanite.ai API not configured")
+        st.info("""
+        🎵 **Professional Mood Analysis with Cyanite.ai**
+        
+        Get much more accurate mood classifications for your music using Cyanite's professional music analysis API.
+        
+        **To set up:**
+        1. Run: `python setup_cyanite.py`
+        2. Follow the setup guide to get your API key
+        3. Come back here to enrich your data!
+        """)
+        
+        if st.button("🔧 Run Cyanite Setup"):
+            st.code("python setup_cyanite.py", language="bash")
+            st.info("💡 Run this command in your terminal to set up Cyanite.ai")
+    else:
+        st.success("✅ Cyanite.ai API configured!")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("🎭 Test Cyanite Connection"):
+                st.code("python test_cyanite_simple.py", language="bash")
+                st.info("💡 Run this to test your Cyanite.ai connection")
+        
+        with col2:
+            if st.button("🎵 Enrich with Cyanite"):
+                st.code("python enrich_with_cyanite.py", language="bash")
+                st.info("💡 Run this to add professional mood analysis to your music")
+        
+        # Advanced Cyanite options
+        with st.expander("🔧 Advanced Cyanite Options"):
+            st.info("""
+            **What Cyanite.ai provides:**
+            - 🎭 Professional mood classification
+            - ⚡ Energy and valence analysis  
+            - 💃 Danceability scoring
+            - 🎵 Tempo and key detection
+            - 🏷️ Genre and style tags
+            - 🎯 Much more accurate than basic APIs
+            
+            **Perfect for:**
+            - 🎵 Creating mood-based playlists
+            - 📊 Understanding your music taste
+            - 🎯 Better recommendations
+            """)
+    
     # Data actions
     st.subheader("🔧 Data Actions")
     
@@ -539,33 +627,116 @@ def show_data_management():
     
     with col1:
         if st.button("📥 Fetch Data"):
-            st.code(f"python -m src.music_rec.cli fetch --username {username}", language="bash")
+            st.code(f"python -m music_rec.cli fetch --username {username}", language="bash")
             st.info("💡 Run this command to fetch your Last.fm data")
     
     with col2:
         if st.button("🎨 Enrich Data"):
-            st.code(f"python -m src.music_rec.cli enrich --username {username}", language="bash")
+            st.code(f"python -m music_rec.cli enrich --username {username}", language="bash")
             st.info("💡 Run this command to add mood and genre data")
     
     with col3:
         if st.button("🧠 Analyze Data"):
-            st.code(f"python -m src.music_rec.cli analyze --username {username}", language="bash")
+            st.code(f"python -m music_rec.cli analyze --username {username}", language="bash")
             st.info("💡 Run this command for AI analysis")
+
+def show_realtime_monitoring():
+    """Real-Time Monitoring page"""
+    st.header("⚡ Real-Time Monitoring")
+    
+    # Initialize real-time features if available
+    username = get_config_value('LASTFM_USERNAME', 'TestUser')
+    if ENHANCED_FEATURES_AVAILABLE:
+        StreamlitUpdater.initialize_realtime_updates(username)
+    
+    # Show real-time status
+    st.subheader("🎵 Real-Time Status")
+    StreamlitUpdater.show_realtime_status()
+    
+    # Show recent activity and insights
+    st.subheader("📈 Recent Activity Analysis")
+    
+    # Get recent updates if available
+    if 'rt_updater' in st.session_state:
+        recent_updates = st.session_state.rt_updater.get_recent_updates()
+        
+        if recent_updates.get('update_history'):
+            st.subheader("📋 Update History")
+            
+            # Show recent updates in a table
+            history_data = []
+            for update in recent_updates['update_history'][-5:]:  # Last 5 updates
+                history_data.append({
+                    'Time': pd.to_datetime(update['timestamp']).strftime('%Y-%m-%d %H:%M'),
+                    'New Scrobbles': update.get('new_scrobbles_count', 0),
+                    'New Artists': len(update.get('new_artists', [])),
+                    'Intensity': f"{update.get('listening_intensity', 0):.1f} tracks/hr"
+                })
+            
+            if history_data:
+                df = pd.DataFrame(history_data)
+                st.dataframe(df, use_container_width=True)
+        else:
+            st.info("No recent updates yet. Check back after some music listening!")
+    
+    # Manual monitoring controls
+    st.subheader("🔧 Monitoring Controls")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("▶️ Start Background Monitoring"):
+            if ENHANCED_FEATURES_AVAILABLE:
+                StreamlitUpdater.start_background_monitoring()
+            else:
+                st.error("Enhanced features not available")
+    
+    with col2:
+        if st.button("⏹️ Stop Monitoring"):
+            if 'rt_updater' in st.session_state:
+                st.session_state.rt_updater.stop_monitoring()
+                st.success("Monitoring stopped")
+    
+    # Real-time insights
+    st.subheader("🎯 Real-Time Insights")
+    st.info("""
+    **Real-time monitoring provides:**
+    - 🎵 Detection of new scrobbles as they happen
+    - 🎨 Automatic mood shift analysis
+    - 👥 Discovery of new artists in your listening
+    - 📊 Listening intensity tracking
+    - 🔄 Smart recommendation refresh triggers
+    
+    **Note:** Monitoring runs in the background and checks for updates every 5 minutes.
+    """)
 
 def main():
     """Main app function"""
     # Sidebar navigation
     st.sidebar.title("🎵 Navigation")
-    page = st.sidebar.radio(
-        "Choose a page:",
-        ["🏠 Dashboard", "🎯 Recommendations", "🎵 Roon Integration", "📊 Data Management"]
-    )
+    
+    # Navigation options (include new features if available)
+    nav_options = ["🏠 Dashboard", "🎯 Recommendations", "🎵 Roon Integration", "📊 Data Management"]
+    if ENHANCED_FEATURES_AVAILABLE:
+        nav_options.insert(-1, "⚡ Real-Time Monitoring")
+    
+    page = st.sidebar.radio("Choose a page:", nav_options)
+    
+    # Show version and feature status
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**🔧 System Status**")
+    if ENHANCED_FEATURES_AVAILABLE:
+        st.sidebar.success("✅ Enhanced features active")
+    else:
+        st.sidebar.info("ℹ️ Basic features active")
     
     # Route to pages
     if page == "🏠 Dashboard":
         show_dashboard()
     elif page == "🎯 Recommendations":
         show_recommendations()
+    elif page == "⚡ Real-Time Monitoring" and ENHANCED_FEATURES_AVAILABLE:
+        show_realtime_monitoring()
     elif page == "🎵 Roon Integration":
         show_roon_integration()
     elif page == "📊 Data Management":
@@ -575,7 +746,7 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style="text-align: center; color: #666; padding: 1rem;">
-        🎵 Music Recommendation System v5.0 | Built with ❤️ and AI
+        🎵 Music Recommendation System v5.2 | Built with ❤️ and AI
     </div>
     """, unsafe_allow_html=True)
 

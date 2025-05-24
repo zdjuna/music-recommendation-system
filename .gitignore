@@ -1,6 +1,10 @@
 # Configuration with sensitive API keys
 config/config.env
 
+# Streamlit secrets (keep template)
+.streamlit/secrets.toml
+!.streamlit/secrets.toml.template
+
 # Data files (your personal music data)
 data/
 *.csv
@@ -60,9 +64,6 @@ Thumbs.db
 
 # PyCharm
 .idea/
-
-# Streamlit
-.streamlit/
 
 # Temporary files
 *.tmp

@@ -25,6 +25,15 @@ python launch_web_app.py
 
 **That's it!** 🎉 Your browser will open automatically to `http://localhost:8501`
 
+#### 🔧 Alternative Launch Methods
+```bash
+# Direct Streamlit command
+streamlit run streamlit_app.py
+
+# CLI interface (for advanced users)
+python run.py
+```
+
 ![Web Interface Preview](https://via.placeholder.com/800x400/667eea/ffffff?text=Beautiful+Music+Dashboard)
 
 ## 🖥️ Hosting Options
@@ -131,6 +140,7 @@ The web app is fully responsive and works beautifully on:
 - MusicBrainz metadata integration
 - Mood and genre classification
 - Audio feature analysis
+- 🆕 **Cyanite.ai Professional Mood Analysis** - Industry-grade music analysis
 
 ### ✅ Phase 4: Smart Recommendations (COMPLETE)
 - AI-powered recommendation engine
@@ -148,6 +158,35 @@ The web app is fully responsive and works beautifully on:
 - **Interactive visualizations**
 - **Mobile-responsive design**
 - **One-click hosting options**
+
+## 🎭 NEW: Professional Mood Analysis with Cyanite.ai
+
+We've integrated **Cyanite.ai** for industry-grade music analysis:
+
+### 🌟 What You Get
+- **🎭 Professional mood classification** - Much more accurate than basic APIs
+- **⚡ Energy and valence analysis** - Precise emotional mapping
+- **💃 Danceability scoring** - Perfect for party playlists
+- **🎵 Tempo and key detection** - Detailed musical features
+- **🏷️ Genre and style tags** - Professional music categorization
+
+### 🚀 Quick Setup
+```bash
+# Easy setup with guided helper
+python setup_cyanite.py
+
+# Test your connection
+python test_cyanite_simple.py
+
+# Enrich your music data
+python enrich_with_cyanite.py
+```
+
+### 🎯 Perfect For
+- Creating accurate mood-based playlists
+- Understanding your music taste patterns  
+- Getting better AI recommendations
+- Professional music analysis and insights
 
 ## 🎯 CLI Commands (Still Available!)
 
@@ -182,6 +221,9 @@ Create a `.env` file:
 # Last.fm API (Required)
 LASTFM_API_KEY=your_lastfm_api_key
 LASTFM_USERNAME=your_username
+
+# Cyanite.ai (Recommended - for professional mood analysis)
+CYANITE_API_KEY=your_cyanite_api_key
 
 # AI Analysis (Optional but recommended)
 OPENAI_API_KEY=your_openai_key

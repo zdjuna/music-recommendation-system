@@ -36,22 +36,32 @@ class AIInsightGenerator:
     Designed to provide actionable insights for busy professionals.
     """
     
+    # Token limits for different types of analysis
+    TOKEN_LIMITS = {
+        'personality': 3000,    # Detailed personality analysis
+        'behavior': 3000,       # Listening behavior patterns  
+        'trends': 3000,         # Musical evolution and trends
+        'recommendations': 3000, # Comprehensive recommendations
+        'default': 3000         # Default for other uses
+    }
+    
     def __init__(self, openai_api_key: Optional[str] = None, 
-                 anthropic_api_key: Optional[str] = None):
+                 anthropic_api_key: Optional[str] = None,
+                 custom_token_limits: Optional[Dict[str, int]] = None):
         """
         Initialize with API keys.
         
         Args:
             openai_api_key: OpenAI API key
             anthropic_api_key: Anthropic API key
+            custom_token_limits: Override default token limits
         """
         self.openai_client = None
         self.anthropic_client = None
         
         # Initialize OpenAI if available
         if openai_api_key and OPENAI_AVAILABLE:
-            openai.api_key = openai_api_key
-            self.openai_client = openai
+            self.openai_client = openai.OpenAI(api_key=openai_api_key)
             logger.info("OpenAI client initialized")
         
         # Initialize Anthropic if available
@@ -61,6 +71,10 @@ class AIInsightGenerator:
         
         if not self.openai_client and not self.anthropic_client:
             logger.warning("No AI clients available. Install openai and/or anthropic packages and provide API keys.")
+        
+        # Update token limits if provided
+        if custom_token_limits:
+            self.TOKEN_LIMITS.update(custom_token_limits)
     
     def generate_comprehensive_insights(self, patterns: Dict) -> Dict[str, str]:
         """
@@ -91,9 +105,9 @@ class AIInsightGenerator:
         prompt = self._build_personality_prompt(patterns)
         
         if self.openai_client:
-            response = self._call_openai(prompt, max_tokens=300)
+            response = self._call_openai(prompt, max_tokens=self.TOKEN_LIMITS['personality'])
         elif self.anthropic_client:
-            response = self._call_anthropic(prompt, max_tokens=300)
+            response = self._call_anthropic(prompt, max_tokens=self.TOKEN_LIMITS['personality'])
         else:
             return {}
         
@@ -105,9 +119,9 @@ class AIInsightGenerator:
         prompt = self._build_behavior_prompt(patterns)
         
         if self.openai_client:
-            response = self._call_openai(prompt, max_tokens=250)
+            response = self._call_openai(prompt, max_tokens=self.TOKEN_LIMITS['behavior'])
         elif self.anthropic_client:
-            response = self._call_anthropic(prompt, max_tokens=250)
+            response = self._call_anthropic(prompt, max_tokens=self.TOKEN_LIMITS['behavior'])
         else:
             return {}
         
@@ -119,9 +133,9 @@ class AIInsightGenerator:
         prompt = self._build_trends_prompt(patterns)
         
         if self.openai_client:
-            response = self._call_openai(prompt, max_tokens=250)
+            response = self._call_openai(prompt, max_tokens=self.TOKEN_LIMITS['trends'])
         elif self.anthropic_client:
-            response = self._call_anthropic(prompt, max_tokens=250)
+            response = self._call_anthropic(prompt, max_tokens=self.TOKEN_LIMITS['trends'])
         else:
             return {}
         
@@ -133,9 +147,9 @@ class AIInsightGenerator:
         prompt = self._build_recommendations_prompt(patterns)
         
         if self.openai_client:
-            response = self._call_openai(prompt, max_tokens=300)
+            response = self._call_openai(prompt, max_tokens=self.TOKEN_LIMITS['recommendations'])
         elif self.anthropic_client:
-            response = self._call_anthropic(prompt, max_tokens=300)
+            response = self._call_anthropic(prompt, max_tokens=self.TOKEN_LIMITS['recommendations'])
         else:
             return {}
         
@@ -259,28 +273,28 @@ class AIInsightGenerator:
         
         return prompt.strip()
     
-    def _call_openai(self, prompt: str, max_tokens: int = 300) -> str:
-        """Call OpenAI API."""
+    def _call_openai(self, prompt: str, max_tokens: int = 3000) -> str:
+        """Call OpenAI API using the modern Responses API."""
         try:
-            response = self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are a music psychology expert who provides insightful, personal analysis of listening patterns."},
-                    {"role": "user", "content": prompt}
-                ],
+            # System prompt + user prompt combined for Responses API
+            full_input = f"You are a music psychology expert who provides insightful, personal analysis of listening patterns.\n\n{prompt}"
+            
+            response = self.openai_client.responses.create(
+                model="gpt-4.1",
+                input=full_input,
                 max_tokens=max_tokens,
                 temperature=0.7
             )
-            return response.choices[0].message.content.strip()
+            return response.output.content.strip()
         except Exception as e:
             logger.error(f"OpenAI API error: {e}")
             return f"AI analysis temporarily unavailable: {str(e)}"
     
-    def _call_anthropic(self, prompt: str, max_tokens: int = 300) -> str:
+    def _call_anthropic(self, prompt: str, max_tokens: int = 3000) -> str:
         """Call Anthropic API."""
         try:
             response = self.anthropic_client.messages.create(
-                model="claude-3-haiku-20240307",
+                model="claude-sonnet-4-20250514",
                 max_tokens=max_tokens,
                 messages=[
                     {"role": "user", "content": prompt}
