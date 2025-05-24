@@ -259,11 +259,11 @@ class AIInsightGenerator:
         
         return prompt.strip()
     
-    def _call_openai(self, prompt: str, max_tokens: int = 300) -> str:
+    def _call_openai(self, prompt: str, max_tokens: int = 3000) -> str:
         """Call OpenAI API."""
         try:
             response = self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4.1-2025-04-14",
                 messages=[
                     {"role": "system", "content": "You are a music psychology expert who provides insightful, personal analysis of listening patterns."},
                     {"role": "user", "content": prompt}
@@ -276,11 +276,11 @@ class AIInsightGenerator:
             logger.error(f"OpenAI API error: {e}")
             return f"AI analysis temporarily unavailable: {str(e)}"
     
-    def _call_anthropic(self, prompt: str, max_tokens: int = 300) -> str:
+    def _call_anthropic(self, prompt: str, max_tokens: int = 3000) -> str:
         """Call Anthropic API."""
         try:
             response = self.anthropic_client.messages.create(
-                model="claude-3-haiku-20240307",
+                model="claude-sonnet-4-20250514",
                 max_tokens=max_tokens,
                 messages=[
                     {"role": "user", "content": prompt}
