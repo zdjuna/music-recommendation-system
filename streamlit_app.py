@@ -4,15 +4,41 @@
 Beautiful Streamlit dashboard for AI-powered music recommendations
 """
 
+# Load environment variables first thing
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file or config/config.env
+env_file = Path('.env')
+config_env_file = Path('config/config.env')
+
+# Read the API key once at the top
+LASTFM_API_KEY_GLOBAL = None
+CYANITE_API_KEY_GLOBAL = None
+
+# Try to load from .env first, then config/config.env
+if env_file.exists():
+    load_dotenv(env_file, override=True)
+    print(f"✅ Loaded environment variables from {env_file}")
+elif config_env_file.exists():
+    load_dotenv(config_env_file, override=True)
+    print(f"✅ Loaded environment variables from {config_env_file}")
+else:
+    print("⚠️ No .env or config/config.env file found")
+
+LASTFM_API_KEY_GLOBAL = os.getenv('LASTFM_API_KEY')
+CYANITE_API_KEY_GLOBAL = os.getenv('CYANITE_API_KEY')
+print(f"[DEBUG streamlit_app top] LASTFM_API_KEY_GLOBAL: {LASTFM_API_KEY_GLOBAL}")
+print(f"[DEBUG streamlit_app top] CYANITE_API_KEY_GLOBAL: {CYANITE_API_KEY_GLOBAL}")
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import json
-import os
 import sys
-from pathlib import Path
 from datetime import datetime, timedelta
 import asyncio
 from typing import Optional, Dict, Any
@@ -32,9 +58,21 @@ st.set_page_config(
 try:
     from music_rec.analyzers.real_time_updater import StreamlitUpdater
     from music_rec.exporters.multi_platform_exporter import StreamlitExportHelper
+    from music_rec.data_fetchers import LastFMFetcher
+    from music_rec.enrichers import MetadataEnricher  
+    from music_rec.analyzers import AIInsightGenerator
+    # Import Cyanite functionality
+    import test_cyanite_simple
+    import enrich_with_cyanite
     ENHANCED_FEATURES_AVAILABLE = True
-except ImportError:
+    CLI_FUNCTIONS_AVAILABLE = True
+    CYANITE_FUNCTIONS_AVAILABLE = True
+except ImportError as e:
     ENHANCED_FEATURES_AVAILABLE = False
+    CLI_FUNCTIONS_AVAILABLE = False
+    CYANITE_FUNCTIONS_AVAILABLE = False
+    # Debug: print what's missing
+    print(f"Import error: {e}")
 
 # Custom CSS for beautiful styling
 st.markdown("""
@@ -595,13 +633,37 @@ def show_data_management():
         
         with col1:
             if st.button("🎭 Test Cyanite Connection"):
-                st.code("python test_cyanite_simple.py", language="bash")
-                st.info("💡 Run this to test your Cyanite.ai connection")
+                if CYANITE_FUNCTIONS_AVAILABLE:
+                    with st.spinner("Testing Cyanite.ai connection..."):
+                        try:
+                            # Run the test function
+                            result = test_cyanite_simple.test_connection()
+                            if result.get('success', False):
+                                st.success("✅ Cyanite.ai connection successful!")
+                                st.balloons()
+                            else:
+                                st.error(f"❌ Connection failed: {result.get('error', 'Unknown error')}")
+                        except Exception as e:
+                            st.error(f"❌ Error testing connection: {str(e)}")
+                else:
+                    st.code("python test_cyanite_simple.py", language="bash")
+                    st.info("💡 Run this to test your Cyanite.ai connection")
         
         with col2:
             if st.button("🎵 Enrich with Cyanite"):
-                st.code("python enrich_with_cyanite.py", language="bash")
-                st.info("💡 Run this to add professional mood analysis to your music")
+                if CYANITE_FUNCTIONS_AVAILABLE:
+                    with st.spinner("Enriching with Cyanite.ai mood analysis... This may take a while."):
+                        try:
+                            # Run the enrichment function
+                            result = enrich_with_cyanite.enrich_user_data(username)
+                            st.success(f"✅ Cyanite enrichment complete! Processed {result.get('processed_tracks', 0)} tracks")
+                            st.balloons()
+                            st.cache_data.clear()
+                        except Exception as e:
+                            st.error(f"❌ Error during Cyanite enrichment: {str(e)}")
+                else:
+                    st.code("python enrich_with_cyanite.py", language="bash")
+                    st.info("💡 Run this to add professional mood analysis to your music")
         
         # Advanced Cyanite options
         with st.expander("🔧 Advanced Cyanite Options"):
@@ -623,22 +685,69 @@ def show_data_management():
     # Data actions
     st.subheader("🔧 Data Actions")
     
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("📥 Fetch Data"):
-            st.code(f"python -m music_rec.cli fetch --username {username}", language="bash")
-            st.info("💡 Run this command to fetch your Last.fm data")
-    
-    with col2:
-        if st.button("🎨 Enrich Data"):
-            st.code(f"python -m music_rec.cli enrich --username {username}", language="bash")
-            st.info("💡 Run this command to add mood and genre data")
-    
-    with col3:
-        if st.button("🧠 Analyze Data"):
-            st.code(f"python -m music_rec.cli analyze --username {username}", language="bash")
-            st.info("💡 Run this command for AI analysis")
+    if CLI_FUNCTIONS_AVAILABLE:
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("📥 Fetch Data"):
+                with st.spinner("Fetching Last.fm data..."):
+                    try:
+                        result = execute_fetch_data(username)
+                        if result["success"]:
+                            st.success(f"✅ Fetched {result.get('total_scrobbles', 0)} scrobbles!")
+                            st.balloons()
+                            # Clear cache to show updated data
+                            st.cache_data.clear()
+                        else:
+                            st.error(f"❌ Error: {result.get('error', 'Unknown error')}")
+                    except Exception as e:
+                        st.error(f"❌ Error fetching data: {str(e)}")
+        
+        with col2:
+            if st.button("🎨 Enrich Data"):
+                with st.spinner("Enriching data with mood and genre info..."):
+                    try:
+                        result = execute_enrich_data(username)
+                        if result["success"]:
+                            st.success(f"✅ Enriched {result.get('enriched_tracks', 0)} tracks!")
+                            st.balloons()
+                            st.cache_data.clear()
+                        else:
+                            st.error(f"❌ Error: {result.get('error', 'Unknown error')}")
+                    except Exception as e:
+                        st.error(f"❌ Error enriching data: {str(e)}")
+        
+        with col3:
+            if st.button("🧠 Analyze Data"):
+                with st.spinner("Running AI analysis..."):
+                    try:
+                        result = execute_analyze_data(username)
+                        if result["success"]:
+                            st.success("✅ AI analysis complete!")
+                            st.balloons()
+                            st.cache_data.clear()
+                        else:
+                            st.error(f"❌ Error: {result.get('error', 'Unknown error')}")
+                    except Exception as e:
+                        st.error(f"❌ Error during analysis: {str(e)}")
+    else:
+        # Fallback to showing commands if CLI functions not available
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("📥 Fetch Data"):
+                st.code(f"python -m music_rec.cli fetch --username {username}", language="bash")
+                st.info("💡 Run this command to fetch your Last.fm data")
+        
+        with col2:
+            if st.button("🎨 Enrich Data"):
+                st.code(f"python -m music_rec.cli enrich --username {username}", language="bash")
+                st.info("💡 Run this command to add mood and genre data")
+        
+        with col3:
+            if st.button("🧠 Analyze Data"):
+                st.code(f"python -m music_rec.cli analyze --username {username}", language="bash")
+                st.info("💡 Run this command for AI analysis")
 
 def show_realtime_monitoring():
     """Real-Time Monitoring page"""
@@ -709,6 +818,147 @@ def show_realtime_monitoring():
     
     **Note:** Monitoring runs in the background and checks for updates every 5 minutes.
     """)
+
+def execute_fetch_data(username):
+    """Wrapper function to fetch Last.fm data using the actual CLI modules"""
+    # import os # No longer needed here if key is passed
+    
+    # Get API key from the globally loaded variable
+    # api_key = os.getenv('LASTFM_API_KEY') # Old way
+    api_key = LASTFM_API_KEY_GLOBAL # Use the globally loaded key
+    print(f"[DEBUG execute_fetch_data] Using LASTFM_API_KEY: {api_key}") # Debug print
+
+    if not api_key or api_key == "your_lastfm_api_key_here": # Added check for placeholder
+        print(f"[ERROR execute_fetch_data] Invalid or placeholder Last.fm API key found: '{api_key}'") # More specific log
+        st.error(f"Last.fm API key is missing or a placeholder. Please check your .env file. Key found: '{api_key}'") # Show in UI
+        return {"success": False, "error": "LASTFM_API_KEY not found or is a placeholder"}
+    
+    try:
+        # Use the actual CLI fetcher
+        print(f"[DEBUG execute_fetch_data] Instantiating LastFMFetcher with API key: '{api_key}' and username: '{username}'") # Log exact key
+        fetcher = LastFMFetcher(
+            api_key=api_key,
+            username=username,
+            data_dir='data'
+        )
+        
+        # Fetch data
+        df = fetcher.fetch_all_scrobbles(incremental=True)
+        
+        if df.empty:
+            return {"success": False, "error": "No data fetched"}
+        
+        # Export to CSV format
+        fetcher.export_to_formats(df, ['csv'])
+        
+        # Get stats
+        stats = fetcher.get_summary_stats()
+        
+        return {
+            "success": True,
+            "total_scrobbles": len(df),
+            "unique_artists": df['artist'].nunique() if 'artist' in df.columns else 0,
+            "stats": stats
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+def execute_enrich_data(username):
+    """Wrapper function to enrich data using Cyanite.ai"""
+    # import os # No longer needed here
+    
+    # api_key = os.getenv('CYANITE_API_KEY') # Old way
+    api_key = CYANITE_API_KEY_GLOBAL # Use the globally loaded key
+    print(f"[DEBUG execute_enrich_data] Using CYANITE_API_KEY: {api_key}") # Debug print
+
+    if not api_key or api_key.startswith("eyJh"): # Basic check if it looks like a JWT
+        pass # Allow JWTs
+    elif not api_key: # Check if it's simply not there
+        print(f"[ERROR execute_enrich_data] Invalid or missing Cyanite API key: {api_key}")
+        return {"success": False, "error": "CYANITE_API_KEY not found or is invalid"}
+
+    if not api_key: # Redundant, but as a safeguard
+        return {"success": False, "error": "CYANITE_API_KEY not found in environment variables"}
+    
+    try:
+        # Check if data file exists
+        data_file = f"data/{username}_scrobbles.csv"
+        if not os.path.exists(data_file):
+            return {"success": False, "error": f"No scrobble data found for {username}. Please fetch data first."}
+        
+        # Use the actual enricher
+        import pandas as pd
+        df = pd.read_csv(data_file)
+        
+        enricher = MetadataEnricher(data_dir='data')
+        
+        # Process in smaller batches for web interface
+        enriched_df = enricher.enrich_dataset(df, sample_size=1000, batch_size=50)
+        
+        # Save enriched data
+        output_file = f"data/{username}_enriched.csv"
+        enriched_df.to_csv(output_file, index=False)
+        
+        return {
+            "success": True,
+            "enriched_tracks": len(enriched_df),
+            "total_tracks": len(df),
+            "output_file": output_file
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+def execute_analyze_data(username):
+    """Wrapper function to analyze data using the actual CLI modules"""
+    try:
+        # Check if data file exists
+        data_file = f"data/{username}_scrobbles.csv"
+        if not os.path.exists(data_file):
+            return {"success": False, "error": f"No scrobble data found for {username}. Please fetch data first."}
+        
+        # Load and analyze data
+        import pandas as pd
+        df = pd.read_csv(data_file)
+        
+        # Use pattern analyzer from CLI
+        from music_rec.analyzers import PatternAnalyzer
+        analyzer = PatternAnalyzer(df)
+        patterns = analyzer.analyze_all_patterns()
+        
+        # Try AI insights if API keys are available
+        insights = {}
+        openai_key = os.getenv('OPENAI_API_KEY')
+        anthropic_key = os.getenv('ANTHROPIC_API_KEY')
+        
+        if openai_key or anthropic_key:
+            ai_generator = AIInsightGenerator(
+                openai_api_key=openai_key,
+                anthropic_api_key=anthropic_key
+            )
+            insights = ai_generator.generate_comprehensive_insights(patterns)
+        
+        # Save analysis results
+        results = {
+            "patterns": patterns,
+            "insights": insights,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        analysis_file = f"data/{username}_analysis.json"
+        with open(analysis_file, 'w') as f:
+            json.dump(results, f, indent=2, default=str)
+        
+        return {
+            "success": True,
+            "patterns_analyzed": len(patterns),
+            "insights_generated": len(insights),
+            "analysis_file": analysis_file
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 def main():
     """Main app function"""

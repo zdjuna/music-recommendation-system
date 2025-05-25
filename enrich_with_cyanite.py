@@ -8,10 +8,110 @@ import pandas as pd
 import os
 from cyanite_mood_enricher import CyaniteMoodEnricher
 import logging
+from dotenv import load_dotenv
+
+# Load environment variables from config file
+load_dotenv('config/config.env')
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+def enrich_user_data(username, max_tracks=100):
+    """Enrich user data with Cyanite.ai - returns result dict for Streamlit integration"""
+    
+    # Get API key from environment
+    api_key = os.getenv('CYANITE_API_KEY')
+    if not api_key:
+        return {"success": False, "error": "CYANITE_API_KEY not found in environment variables"}
+    
+    # Load data
+    csv_path = f"data/{username}_scrobbles.csv"
+    if not os.path.exists(csv_path):
+        return {"success": False, "error": f"Scrobbles file not found: {csv_path}"}
+    
+    try:
+        # Load data
+        df = pd.read_csv(csv_path)
+        unique_tracks = df[['artist', 'track']].drop_duplicates()
+        
+        # Limit tracks for online deployment (to avoid long processing times)
+        if max_tracks and len(unique_tracks) > max_tracks:
+            unique_tracks = unique_tracks.head(max_tracks)
+        
+        # Create enricher
+        enricher = CyaniteMoodEnricher(api_key)
+        
+        # Test with one track first
+        test_artist = unique_tracks.iloc[0]['artist']
+        test_track = unique_tracks.iloc[0]['track']
+        test_result = enricher.search_and_analyze_track(test_artist, test_track)
+        
+        if not test_result:
+            return {"success": False, "error": "API test failed - check your connection and API key"}
+        
+        # Enrich unique tracks
+        enriched_tracks = enricher.enrich_dataset(
+            unique_tracks, 
+            artist_col='artist', 
+            track_col='track',
+            delay=0.5  # Be respectful to API
+        )
+        
+        # Merge back with full dataset
+        mood_lookup = {}
+        for _, row in enriched_tracks.iterrows():
+            key = (row['artist'], row['track'])
+            mood_lookup[key] = {
+                'simplified_mood': row.get('simplified_mood', 'unknown'),
+                'cyanite_valence': row.get('cyanite_valence'),
+                'cyanite_energy': row.get('cyanite_energy'),
+                'cyanite_danceability': row.get('cyanite_danceability'),
+                'cyanite_genre': row.get('cyanite_genre'),
+                'cyanite_tempo': row.get('cyanite_tempo')
+            }
+        
+        # Add mood data to full dataset
+        df['cyanite_mood'] = df.apply(
+            lambda row: mood_lookup.get((row['artist'], row['track']), {}).get('simplified_mood', 'unknown'), 
+            axis=1
+        )
+        
+        df['cyanite_valence'] = df.apply(
+            lambda row: mood_lookup.get((row['artist'], row['track']), {}).get('cyanite_valence'), 
+            axis=1
+        )
+        
+        df['cyanite_energy'] = df.apply(
+            lambda row: mood_lookup.get((row['artist'], row['track']), {}).get('cyanite_energy'), 
+            axis=1
+        )
+        
+        # Save enriched data
+        output_path = f"data/{username}_scrobbles_cyanite_enriched.csv"
+        df.to_csv(output_path, index=False)
+        
+        # Save mood mappings
+        mood_mapping_path = f"data/{username}_cyanite_mood_mappings.csv"
+        enriched_tracks.to_csv(mood_mapping_path, index=False)
+        
+        # Calculate success stats
+        total_enriched = len(df[df['cyanite_mood'] != 'unknown'])
+        success_rate = (total_enriched/len(df)*100)
+        
+        return {
+            "success": True, 
+            "processed_tracks": len(unique_tracks),
+            "total_scrobbles": len(df),
+            "enriched_scrobbles": total_enriched,
+            "success_rate": success_rate,
+            "output_file": output_path,
+            "mapping_file": mood_mapping_path
+        }
+        
+    except Exception as e:
+        logger.error(f"Enrichment error: {e}")
+        return {"success": False, "error": f"Processing error: {str(e)}"}
 
 def load_clean_data():
     """Load the cleaned CSV data"""
