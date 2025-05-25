@@ -17,7 +17,7 @@ load_dotenv('config/config.env')
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def enrich_user_data(username, max_tracks=100):
+def enrich_user_data(username, max_tracks=None):
     """Enrich user data with Cyanite.ai - returns result dict for Streamlit integration"""
     
     # Get API key from environment

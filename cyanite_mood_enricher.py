@@ -28,17 +28,47 @@ class CyaniteMoodEnricher:
             "Content-Type": "application/json"
         }
         self.logger = logger
+        # Add statistics tracking
+        self.stats = {
+            'searches_performed': 0,
+            'tracks_found': 0,
+            'analysis_authorized': 0,
+            'analysis_not_authorized': 0,
+            'no_matches': 0,
+            'errors': 0
+        }
         
     def search_and_analyze_track(self, title: str, artist_name: str, timeout=30):
         """Search for a track and get its mood analysis using AudioAnalysisV7 and advancedSearch."""
         
-        searchText = f"{artist_name} {title}"
-
+        self.stats['searches_performed'] += 1
+        
+        # Try different search patterns for better accuracy
+        search_patterns = [
+            f'"{artist_name}" "{title}"',  # Exact match with quotes
+            f'{artist_name} - {title}',     # Dash separator format
+            f'{artist_name} {title}',        # Simple concatenation
+            f'artist:"{artist_name}" title:"{title}"',  # Field-specific search (if supported)
+        ]
+        
+        for search_pattern in search_patterns:
+            self.logger.info(f"[Cyanite Debug V7] Trying search pattern: '{search_pattern}'")
+            result = self._search_single_pattern(search_pattern, artist_name, title, timeout)
+            if result:
+                return result
+        
+        # If no pattern worked, log and return None
+        self.logger.warning(f"No valid results found for any search pattern for '{artist_name} - {title}'")
+        self.stats['no_matches'] += 1
+        return None
+    
+    def _search_single_pattern(self, searchText: str, original_artist: str, original_title: str, timeout=30):
+        """Try a single search pattern and return result if found"""
         # GraphQL query using freeTextSearch to find the Spotify track by text
         query = """
         query FreeTextSearchTrackV7($searchText: String!) {
           freeTextSearch(
-            first: 1
+            first: 10
             target: { spotify: {} }
             searchText: $searchText
           ) {
@@ -51,6 +81,7 @@ class CyaniteMoodEnricher:
                 node {
                   id
                   title
+                  __typename
                 }
               }
             }
@@ -59,7 +90,6 @@ class CyaniteMoodEnricher:
         """
         variables = {"searchText": searchText}
 
-        self.logger.info(f"[Cyanite Debug V7] Searching with freeTextSearch for: '{searchText}'")
         try:
             response = requests.post(
                 self.graphql_url,
@@ -67,73 +97,133 @@ class CyaniteMoodEnricher:
                 json={"query": query, "variables": variables},
                 timeout=timeout
             )
-            self.logger.info(f"[Cyanite Debug V7] API Raw Response for '{searchText}': Status={response.status_code}, Text={response.text[:1000]}...")
-
+            
             if response.status_code == 200:
                 data = response.json()
-                self.logger.info(f"[Cyanite Debug V7] API JSON Response for '{searchText}': {json.dumps(data, indent=2)}")
                 
                 if data.get("errors"):
                     self.logger.error(f"Cyanite API returned GraphQL-level errors for '{searchText}': {data['errors']}")
+                    self.stats['errors'] += 1
                     return None 
                 
                 search_data = data.get("data", {}).get("freeTextSearch")
                 
                 if not search_data:
-                    self.logger.warning(f"No 'freeTextSearch' data in response for '{searchText}'. API Response Data: {data.get('data')}")
                     return None
 
                 if search_data.get("__typename") == "FreeTextSearchError":
                     self.logger.error(f"freeTextSearch failed for '{searchText}': Code: {search_data.get('code')}, Message: {search_data.get('message')}")
+                    self.stats['errors'] += 1
                     return None
 
                 edges = search_data.get("edges", [])
                 if edges:
-                    node_wrapper = edges[0].get("node")
-                    if not node_wrapper:
-                        self.logger.warning(f"No 'node' in the first edge for '{searchText}'. Edges: {edges}")
-                        return None
-
-                    # Node payload is directly the SpotifyTrack
-                    track_node = node_wrapper
-
-                    if not track_node:
-                        self.logger.warning(f"No track information found in response for '{searchText}'. Node wrapper: {node_wrapper}")
-                        return None
-
-                    typename = track_node.get("__typename")
-                    if typename != "AdvancedSearchNodeSpotifyTrack":
-                        self.logger.warning(f"Unexpected track __typename '{typename}' for '{searchText}'.")
-                        # proceed but warn
-
-                    track_id = track_node.get("id")
-                    actual_title = track_node.get("title")
-
-                    # Step 2: fetch audio analysis via spotifyTrack query
-                    analysis_result = self._fetch_spotify_analysis_v7(track_id, timeout=timeout)
-                    if not analysis_result:
-                        return None
-
-                    mood_tags_list = analysis_result.get("moodTags", [])
-                    genre_tags_list = analysis_result.get("genreTags", [])
-
-                    return {
-                        "id": track_id,
-                        "title": actual_title,
-                        "artist": artist_name,
-                        "mood_tags": mood_tags_list,
-                        "genre_tags": genre_tags_list,
-                        "simplified_mood": self._classify_simplified_mood_from_tags(mood_tags_list)
-                    }
-                else:
-                    self.logger.warning(f"No track edges found in API response for '{searchText}' using freeTextSearch query.")
+                    self.logger.info(f"Cyanite returned {len(edges)} results for '{searchText}'")
+                    
+                    # Log all results for debugging
+                    for i, edge in enumerate(edges):
+                        node = edge.get("node", {})
+                        title = node.get("title", "")
+                        track_id = node.get("id", "")
+                        self.logger.debug(f"  Result {i+1}: '{title}' (ID: {track_id})")
+                    
+                    # Try to find a track that matches our search
+                    for edge in edges:
+                        node = edge.get("node", {})
+                        if not node:
+                            continue
+                        
+                        track_id = node.get("id")
+                        actual_title = node.get("title", "")
+                        
+                        # For Spotify tracks returned by Cyanite, the title often includes artist
+                        # Let's check if our search terms appear in the result
+                        actual_title_lower = actual_title.lower()
+                        original_artist_lower = original_artist.lower()
+                        original_title_lower = original_title.lower()
+                        
+                        # Check if this might be our track
+                        artist_match = False
+                        title_match = False
+                        
+                        # Check for artist match (might be in the title)
+                        if original_artist_lower in actual_title_lower:
+                            artist_match = True
+                        # Also check for common variations
+                        elif original_artist_lower.replace(" ", "") in actual_title_lower.replace(" ", ""):
+                            artist_match = True
+                        # Check for partial match (at least first word)
+                        elif original_artist_lower.split()[0] in actual_title_lower:
+                            artist_match = True
+                            
+                        # Check for title match
+                        if original_title_lower in actual_title_lower:
+                            title_match = True
+                        # Check without spaces
+                        elif original_title_lower.replace(" ", "") in actual_title_lower.replace(" ", ""):
+                            title_match = True
+                        # Check for partial match (at least first two words if title has multiple words)
+                        elif len(original_title_lower.split()) > 1 and " ".join(original_title_lower.split()[:2]) in actual_title_lower:
+                            title_match = True
+                        elif original_title_lower.split()[0] in actual_title_lower:
+                            title_match = True
+                        
+                        # If we have both artist and title match (or at least one strong match), use this track
+                        if artist_match or title_match:
+                            self.logger.info(f"Found potential match: '{actual_title}' (artist_match={artist_match}, title_match={title_match})")
+                            self.stats['tracks_found'] += 1
+                            
+                            # Step 2: fetch audio analysis via spotifyTrack query
+                            analysis_result = self._fetch_spotify_analysis_v7(track_id, timeout=timeout)
+                            
+                            if analysis_result:
+                                # Successfully got analysis
+                                mood_tags_list = analysis_result.get("moodTags", [])
+                                genre_tags_list = analysis_result.get("genreTags", [])
+                                
+                                return {
+                                    "id": track_id,
+                                    "title": actual_title,
+                                    "artist": original_artist,
+                                    "mood_tags": mood_tags_list,
+                                    "genre_tags": genre_tags_list,
+                                    "simplified_mood": self._classify_simplified_mood_from_tags(mood_tags_list)
+                                }
+                            elif analysis_result is False:
+                                # Explicitly not authorized - return partial data
+                                self.logger.info(f"Track '{actual_title}' found but analysis not authorized - returning partial data")
+                                return {
+                                    "id": track_id,
+                                    "title": actual_title,
+                                    "artist": original_artist,
+                                    "mood_tags": [],
+                                    "genre_tags": [],
+                                    "simplified_mood": "not_authorized",
+                                    "authorization_status": "not_authorized"
+                                }
+                            else:
+                                # Other analysis failure - continue to next result
+                                self.logger.warning(f"Analysis failed for '{actual_title}', trying next result")
+                                continue
+                    
+                    # If we get here, no good matches found
+                    self.logger.warning(f"No matching tracks found in {len(edges)} results for '{original_artist} - {original_title}'")
                     return None
+                else:
+                    self.logger.info(f"No results returned by Cyanite for '{searchText}'")
+                    return None
+                            
             else:
                 self.logger.error(f"Cyanite API request failed for track '{searchText}': {response.status_code} - {response.text}")
-                return None
+                self.stats['errors'] += 1
+                
         except requests.exceptions.RequestException as e:
             self.logger.error(f"Request exception during Cyanite search for '{searchText}': {e}")
-            return None
+            self.stats['errors'] += 1
+            
+        return None
+    
+
     
     def _process_track_data(self, track_data):
         """Process and clean track data from Cyanite API"""
@@ -236,28 +326,45 @@ class CyaniteMoodEnricher:
         query = """
         query SpotifyTrackAnalysis($trackId: ID!) {
           spotifyTrack(id: $trackId) {
-            id
-            title
-            audioAnalysisV7 {
-              __typename
-              ... on AudioAnalysisV7Finished {
-                result {
-                  moodTags
-                  genreTags
+            __typename
+            ... on SpotifyTrack {
+              id
+              title
+              audioAnalysisV7 {
+                __typename
+                ... on AudioAnalysisV7Finished {
+                  result {
+                    moodTags
+                    genreTags
+                  }
+                }
+                ... on AudioAnalysisV7Failed {
+                  error {
+                    message
+                  }
+                }
+                ... on AudioAnalysisV7Processing {
+                  __typename
+                }
+                ... on AudioAnalysisV7Enqueued {
+                  __typename
+                }
+                ... on AudioAnalysisV7NotStarted {
+                  __typename
+                }
+                ... on AudioAnalysisV7NotAuthorized {
+                  message
                 }
               }
-              ... on AudioAnalysisV7Failed {
-                error { message }
-              }
-              ... on AudioAnalysisV7NotStarted { __typename }
-              ... on AudioAnalysisV7Enqueued { __typename }
-              ... on AudioAnalysisV7Processing { __typename }
-              ... on AudioAnalysisV7NotAuthorized { __typename }
+            }
+            ... on SpotifyTrackError {
+              message
             }
           }
         }
         """
         variables = {"trackId": track_id}
+        self.logger.info(f"[Cyanite Debug V7] Fetching SpotifyTrackAnalysis for ID: {track_id}")
 
         try:
             response = requests.post(
@@ -269,40 +376,59 @@ class CyaniteMoodEnricher:
             if response.status_code != 200:
                 self.logger.error(f"SpotifyTrack query failed for '{track_id}': {response.status_code} - {response.text}")
                 return None
+            
             data = response.json()
             if data.get("errors"):
                 self.logger.error(f"GraphQL errors fetching SpotifyTrack '{track_id}': {data['errors']}")
                 return None
-            track_data = data.get("data", {}).get("spotifyTrack")
-            if not track_data:
+            
+            spotify_track_result = data.get("data", {}).get("spotifyTrack")
+            if not spotify_track_result:
                 self.logger.warning(f"No spotifyTrack data for id '{track_id}'.")
                 return None
 
-            analysis_node = track_data.get("audioAnalysisV7")
-            if not analysis_node:
-                self.logger.warning(f"No audioAnalysisV7 field for Spotify track '{track_id}'.")
+            # Check the __typename to determine if it's a SpotifyTrack or SpotifyTrackError
+            result_typename = spotify_track_result.get("__typename")
+            
+            if result_typename == "SpotifyTrackError":
+                error_msg = spotify_track_result.get("message", "Unknown error")
+                error_code = spotify_track_result.get("code", "Unknown code")
+                self.logger.error(f"SpotifyTrackError for id '{track_id}': {error_code} - {error_msg}")
                 return None
+            
+            elif result_typename == "SpotifyTrack":
+                # Successfully got a SpotifyTrack
+                analysis_node = spotify_track_result.get("audioAnalysisV7")
+                if not analysis_node:
+                    self.logger.warning(f"No audioAnalysisV7 field for Spotify track '{track_id}'.")
+                    return None
 
-            typename = analysis_node.get("__typename")
-            if typename == "AudioAnalysisV7Finished":
-                result = analysis_node.get("result", {})
-                return {
-                    "moodTags": result.get("moodTags", []),
-                    "genreTags": result.get("genreTags", []),
-                }
-            elif typename == "AudioAnalysisV7Failed":
-                err_msg = analysis_node.get("error", {}).get("message", "unknown")
-                self.logger.error(f"AudioAnalysisV7 failed for track '{track_id}': {err_msg}")
-            elif typename == "AudioAnalysisV7NotStarted":
-                self.logger.warning(f"AudioAnalysisV7 not started for track '{track_id}'.")
-            elif typename == "AudioAnalysisV7Enqueued":
-                self.logger.warning(f"AudioAnalysisV7 enqueued for track '{track_id}'.")
-            elif typename == "AudioAnalysisV7Processing":
-                self.logger.warning(f"AudioAnalysisV7 processing for track '{track_id}'.")
-            elif typename == "AudioAnalysisV7NotAuthorized":
-                self.logger.warning(f"AudioAnalysisV7 not authorized for track '{track_id}'.")
+                typename = analysis_node.get("__typename")
+                if typename == "AudioAnalysisV7Finished":
+                    result = analysis_node.get("result", {})
+                    self.stats['analysis_authorized'] += 1
+                    return {
+                        "moodTags": result.get("moodTags", []),
+                        "genreTags": result.get("genreTags", []),
+                    }
+                elif typename == "AudioAnalysisV7Failed":
+                    err_msg = analysis_node.get("error", {}).get("message", "unknown")
+                    self.logger.error(f"AudioAnalysisV7 failed for track '{track_id}': {err_msg}")
+                elif typename == "AudioAnalysisV7Processing":
+                    self.logger.warning(f"AudioAnalysisV7 processing for track '{track_id}'.")
+                elif typename == "AudioAnalysisV7Enqueued":
+                    self.logger.warning(f"AudioAnalysisV7 enqueued for track '{track_id}'.")
+                elif typename == "AudioAnalysisV7NotStarted":
+                    self.logger.warning(f"AudioAnalysisV7 not started for track '{track_id}'.")
+                elif typename == "AudioAnalysisV7NotAuthorized":
+                    self.logger.error(f"AudioAnalysisV7 not authorized for track '{track_id}'.")
+                    self.stats['analysis_not_authorized'] += 1
+                    return False  # Explicitly return False to indicate not authorized
+                else:
+                    self.logger.warning(f"Unhandled AudioAnalysisV7 typename '{typename}' for track '{track_id}'.")
             else:
-                self.logger.warning(f"Unhandled AudioAnalysisV7 typename '{typename}' for track '{track_id}'.")
+                self.logger.error(f"Unexpected __typename '{result_typename}' in spotifyTrack result for id '{track_id}'.")
+                
         except requests.exceptions.RequestException as e:
             self.logger.error(f"Request exception fetching AudioAnalysisV7 for track '{track_id}': {e}")
         return None
@@ -341,7 +467,12 @@ class CyaniteMoodEnricher:
                 successful_matches += 1
                 
                 mood = cyanite_data.get('simplified_mood', 'unknown')
-                logger.debug(f"✅ Enriched: {artist_name_from_df} - {title_from_df} → {mood}")
+                auth_status = cyanite_data.get('authorization_status', 'authorized')
+                
+                if auth_status == 'not_authorized':
+                    logger.info(f"⚠️  Found but not authorized: {artist_name_from_df} - {title_from_df}")
+                else:
+                    logger.debug(f"✅ Enriched: {artist_name_from_df} - {title_from_df} → {mood}")
             else:
                 # No Cyanite match found
                 enriched_row['simplified_mood'] = 'not_found'
@@ -357,6 +488,15 @@ class CyaniteMoodEnricher:
         success_rate = (successful_matches / len(df)) * 100
         logger.info(f"🎉 Enrichment complete! Successfully matched {successful_matches}/{len(df)} tracks")
         logger.info(f"📊 Success rate: {success_rate:.1f}%")
+        
+        # Log detailed statistics
+        logger.info(f"📈 Detailed Statistics:")
+        logger.info(f"   - Searches performed: {self.stats['searches_performed']}")
+        logger.info(f"   - Tracks found: {self.stats['tracks_found']}")
+        logger.info(f"   - Analysis authorized: {self.stats['analysis_authorized']}")
+        logger.info(f"   - Analysis not authorized: {self.stats['analysis_not_authorized']}")
+        logger.info(f"   - No matches found: {self.stats['no_matches']}")
+        logger.info(f"   - Errors encountered: {self.stats['errors']}")
         
         return enriched_df
     

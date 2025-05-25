@@ -139,7 +139,7 @@ DEFAULT_CONFIG = {
     'LOG_LEVEL': 'INFO'
 }
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+@st.cache_data(ttl=60)  # Cache for 1 minute only
 def load_user_data(username: str) -> Dict[str, Any]:
     """Load user's music data and stats with caching"""
     data_dir = Path('data')
@@ -655,7 +655,7 @@ def show_data_management():
                     with st.spinner("Enriching with Cyanite.ai mood analysis... This may take a while."):
                         try:
                             # Run the enrichment function
-                            result = enrich_with_cyanite.enrich_user_data(username)
+                            result = execute_enrich_data(username)
                             st.success(f"✅ Cyanite enrichment complete! Processed {result.get('processed_tracks', 0)} tracks")
                             st.balloons()
                             st.cache_data.clear()
@@ -709,9 +709,12 @@ def show_data_management():
                     try:
                         result = execute_enrich_data(username)
                         if result["success"]:
-                            st.success(f"✅ Enriched {result.get('enriched_tracks', 0)} tracks!")
+                            st.success(f"✅ Enriched {result.get('processed_tracks', 0)} tracks with research-based emotion analysis!")
                             st.balloons()
+                            # Clear cache to show updated data
                             st.cache_data.clear()
+                            # Force refresh by rerunning the app
+                            st.rerun()
                         else:
                             st.error(f"❌ Error: {result.get('error', 'Unknown error')}")
                     except Exception as e:
@@ -865,50 +868,97 @@ def execute_fetch_data(username):
         return {"success": False, "error": str(e)}
 
 def execute_enrich_data(username):
-    """Wrapper function to enrich data using Cyanite.ai"""
-    # import os # No longer needed here
-    
-    # api_key = os.getenv('CYANITE_API_KEY') # Old way
-    api_key = CYANITE_API_KEY_GLOBAL # Use the globally loaded key
-    print(f"[DEBUG execute_enrich_data] Using CYANITE_API_KEY: {api_key}") # Debug print
-
-    if not api_key or api_key.startswith("eyJh"): # Basic check if it looks like a JWT
-        pass # Allow JWTs
-    elif not api_key: # Check if it's simply not there
-        print(f"[ERROR execute_enrich_data] Invalid or missing Cyanite API key: {api_key}")
-        return {"success": False, "error": "CYANITE_API_KEY not found or is invalid"}
-
-    if not api_key: # Redundant, but as a safeguard
-        return {"success": False, "error": "CYANITE_API_KEY not found in environment variables"}
+    """Wrapper function to enrich data using MusicBrainz API"""
     
     try:
-        # Check if data file exists
-        data_file = f"data/{username}_scrobbles.csv"
-        if not os.path.exists(data_file):
-            return {"success": False, "error": f"No scrobble data found for {username}. Please fetch data first."}
+        # Import from the root directory where the file actually is
+        from musicbrainz_enricher import MusicBrainzEnricher
         
-        # Use the actual enricher
-        import pandas as pd
+        # Load scrobbles
+        data_file = f"data/{username}_scrobbles.csv"
+        if not os.path.exists(data_file): # Added check for data_file existence
+            return {"success": False, "error": f"No scrobble data found for {username}. Please fetch data first."}
         df = pd.read_csv(data_file)
         
-        enricher = MetadataEnricher(data_dir='data')
+        # Get unique tracks to avoid processing duplicates
+        unique_tracks = df[['artist', 'track']].drop_duplicates()
         
-        # Process in smaller batches for web interface
-        enriched_df = enricher.enrich_dataset(df, sample_size=1000, batch_size=50)
+        # Initialize MusicBrainz enricher with research-based mood analysis
+        from research_based_emotion_analyzer import ResearchBasedEmotionAnalyzer
+        from research_based_mood_analyzer import ResearchBasedMoodAnalyzer
+        enricher = MusicBrainzEnricher()
+        emotion_analyzer = ResearchBasedEmotionAnalyzer()
+        mood_analyzer = ResearchBasedMoodAnalyzer()
         
-        # Save enriched data
+        # Process with a reasonable limit for web interface
+        max_tracks_to_process = min(50, len(unique_tracks))  # Process up to 50 tracks for MusicBrainz
+        
+        # Convert to list of dictionaries for MusicBrainz enricher
+        tracks_to_process = []
+        for _, row in unique_tracks.head(max_tracks_to_process).iterrows():
+            tracks_to_process.append({
+                'artist': row['artist'],
+                'title': row['track']
+            })
+        
+        # Enrich tracks using MusicBrainz
+        enriched_results = enricher.enrich_tracks_batch(tracks_to_process, max_tracks=max_tracks_to_process)
+        
+        # Convert results back to DataFrame format with advanced mood analysis
+        enriched_data = []
+        for track_key, enriched_info in enriched_results.items():
+            artist, title = track_key.split(' - ', 1)
+            
+            # Get research-based emotion analysis
+            basic_tags = enriched_info.get('musicbrainz_tags', [])
+            emotion_vector = mood_analyzer.analyze_track_emotion(artist, title)
+            
+            enriched_data.append({
+                'artist': artist,
+                'track': title,
+                'musicbrainz_tags': ', '.join(enriched_info.get('musicbrainz_tags', [])),
+                'musicbrainz_genres': ', '.join(enriched_info.get('musicbrainz_genres', [])),
+                'emotion_label': emotion_vector.to_mood_label(),
+                'valence': f"{emotion_vector.valence:+.2f}",
+                'arousal': f"{emotion_vector.arousal:+.2f}",
+                'dominance': f"{emotion_vector.dominance:+.2f}",
+                'emotion_confidence': f"{emotion_vector.confidence:.2f}",
+                'emotional_quadrant': _get_emotional_quadrant(emotion_vector),
+                'simplified_mood': enriched_info.get('simplified_mood', 'neutral'),
+                'first_release_date': enriched_info.get('first_release_date'),
+                'country': enriched_info.get('country'),
+                'label': enriched_info.get('label'),
+                'musicbrainz_id': enriched_info.get('musicbrainz_id'),
+                'musicbrainz_url': enriched_info.get('musicbrainz_url'),
+                'length': enriched_info.get('length')
+            })
+        
+        enriched_df = pd.DataFrame(enriched_data)
+        
+        # Save results
         output_file = f"data/{username}_enriched.csv"
         enriched_df.to_csv(output_file, index=False)
         
         return {
             "success": True,
-            "enriched_tracks": len(enriched_df),
-            "total_tracks": len(df),
+            "processed_tracks": len(enriched_df),
+            "total_unique_tracks": len(unique_tracks),
             "output_file": output_file
         }
         
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+def _get_emotional_quadrant(emotion_vector):
+    """Get emotional quadrant for display"""
+    if emotion_vector.valence > 0 and emotion_vector.arousal > 0:
+        return "High Energy Positive"
+    elif emotion_vector.valence > 0 and emotion_vector.arousal < 0:
+        return "Low Energy Positive"
+    elif emotion_vector.valence < 0 and emotion_vector.arousal > 0:
+        return "High Energy Negative"
+    else:
+        return "Low Energy Negative"
 
 def execute_analyze_data(username):
     """Wrapper function to analyze data using the actual CLI modules"""
