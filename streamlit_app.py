@@ -43,6 +43,11 @@ from datetime import datetime, timedelta
 import asyncio
 from typing import Optional, Dict, Any
 
+# Imports for Roon direct integration
+from music_rec.recommenders import RecommendationEngine, RecommendationRequest
+from music_rec.exporters import RoonIntegration
+# datetime is already imported, asyncio is already imported
+
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / 'src'))
 
@@ -541,45 +546,145 @@ def show_roon_integration():
     - Real-time auto-sync
     - Context-aware suggestions
     """)
-    
+
     # Connection test
     col1, col2 = st.columns(2)
-    
+
     with col1:
         if st.button("🔌 Test Roon Connection"):
             st.info("🔄 Testing connection to Roon Core...")
             st.info(f"💡 In terminal, run: `python -m music_rec.cli roon-connect --core-host {roon_host}`")
-    
+
     with col2:
         if st.button("🏠 Show Zones"):
             st.info("🔄 Getting zone information...")
             st.info(f"💡 In terminal, run: `python -m music_rec.cli roon-zones --core-host {roon_host}`")
-    
+
     # Quick playlist creation
     st.subheader("🎵 Quick Roon Playlist")
-    
+
     col1, col2, col3 = st.columns(3)
-    
+
     with col1:
-        zone_id = st.text_input("Zone ID", placeholder="e.g., kitchen, living_room")
-        
+        # Using a unique key for the direct integration input
+        zone_id_input_direct = st.text_input("Zone ID (Optional)", key="direct_zone_id", placeholder="e.g., kitchen, living_room")
+
     with col2:
-        playlist_mood = st.selectbox("Mood", ["", "energetic", "calm", "happy", "focus"])
-        
+        playlist_mood_input_direct = st.selectbox(
+            "Mood (Optional)", 
+            ["", "energetic", "calm", "happy", "focus", "sad", "upbeat", "chill", "melancholic"], 
+            key="direct_playlist_mood"
+        )
+
     with col3:
-        auto_play = st.checkbox("Auto-play", value=True)
-    
-    if st.button("🎵 Create Roon Playlist"):
+        auto_play_input_direct = st.checkbox("Auto-play", value=True, key="direct_auto_play")
+
+    if st.button("🚀 Create Roon Playlist Directly"):
+        lastfm_username = get_config_value('LASTFM_USERNAME', 'TestUser')
+        if not lastfm_username:
+            st.error("🚨 Last.fm username not configured. Please set it up.")
+            # Changed to return instead of st.stop() for better flow control
+            return
+
+        async def async_create_roon_playlist(
+            host: str, 
+            user: str, 
+            mood: Optional[str], 
+            zone: Optional[str], 
+            autoplay: bool
+        ):
+            engine = RecommendationEngine(username=user)
+            # Ensure data is loaded for the engine
+            if engine.scrobbles_df is None: # Or check specific data needed by engine for recommendations
+                return "❌ Last.fm scrobble data not found for the user. Please fetch data first from the 'Data Management' page."
+
+            roon_integration = RoonIntegration(core_host=host, recommendation_engine=engine)
+            
+            try:
+                await roon_integration.connect()
+                if not roon_integration.is_connected():
+                    return "❌ Failed to connect to Roon Core. Check host IP, ensure Roon Core is running, and the extension is enabled in Roon settings (Settings > Extensions)."
+
+                # Create RecommendationRequest
+                req = RecommendationRequest(
+                    mood=mood if mood else None, # Pass mood if selected
+                    playlist_length=20, # Default playlist length for this quick create
+                    # Other RecommendationRequest fields can be left as default or set to None
+                    # e.g., energy_level=None, discovery_level=0.3 (default), time_context=None etc.
+                )
+                
+                # Generate a dynamic playlist name
+                playlist_name = f"Streamlit {mood.title() if mood else 'Mix'} - {datetime.now().strftime('%Y%m%d %H%M')}"
+                
+                success = await roon_integration.create_recommendation_playlist(
+                    request=req,
+                    playlist_name=playlist_name,
+                    zone_id=zone if zone else None, # Pass None if zone is empty string or not provided
+                    auto_play=autoplay
+                )
+                
+                if success:
+                    playback_message = ""
+                    if autoplay:
+                        if zone:
+                            playback_message = "Playback started."
+                        else:
+                            playback_message = "Playlist created, but playback not started as no zone was specified for autoplay."
+                    else:
+                        playback_message = "Ready for playback."
+                    return f"✅ Successfully created playlist '{playlist_name}' in Roon! {playback_message}"
+                else:
+                    # Provide more specific feedback if possible
+                    return f"⚠️ Failed to create playlist in Roon. This could be due to Roon logs, app permissions, or no tracks matching the recommendation criteria. Please check Roon."
+            except Exception as e:
+                # Log the full error for debugging
+                import logging
+                logging.error(f"Error during Roon playlist creation: {e}", exc_info=True)
+                return f"❌ An error occurred during Roon playlist creation: {str(e)}"
+            finally:
+                # Ensure disconnection happens even if errors occurred mid-process
+                if roon_integration.is_connected(): 
+                    await roon_integration.disconnect()
+
+        with st.spinner(f"🤖 Connecting to Roon and creating '{playlist_mood_input_direct.title() if playlist_mood_input_direct else 'Mix'}' playlist..."):
+            result_message = asyncio.run(async_create_roon_playlist(
+                host=roon_host,
+                user=lastfm_username,
+                mood=playlist_mood_input_direct if playlist_mood_input_direct else None,
+                zone=zone_id_input_direct if zone_id_input_direct else None,
+                autoplay=auto_play_input_direct
+            ))
+            
+            if "✅" in result_message:
+                st.success(result_message)
+                st.balloons()
+            elif "⚠️" in result_message:
+                st.warning(result_message)
+            else:
+                st.error(result_message)
+
+    st.markdown("---")
+    st.caption("Legacy CLI command generation (for reference or manual use):")
+    # Using different keys for CLI widgets to avoid conflict with direct input widgets
+    col_cli1, col_cli2, col_cli3 = st.columns(3)
+    with col_cli1:
+        zone_id_cli = st.text_input("Zone ID (CLI)", key="cli_zone_id_input", placeholder="e.g., kitchen")
+    with col_cli2:
+        playlist_mood_cli = st.selectbox("Mood (CLI)", key="cli_playlist_mood_input", options=["", "energetic", "calm", "happy", "focus"])
+    with col_cli3:
+        auto_play_cli = st.checkbox("Auto-play (CLI)", key="cli_auto_play_input", value=True)
+
+    if st.button("🛠️ Generate Roon Playlist CLI Command"):
         cmd_parts = [
             f"python -m music_rec.cli roon-playlist",
             f"--core-host {roon_host}"
         ]
         
-        if zone_id:
-            cmd_parts.append(f"--zone-id {zone_id}")
-        if playlist_mood:
-            cmd_parts.append(f"--mood {playlist_mood}")
-        if auto_play:
+        if zone_id_cli:
+            cmd_parts.append(f"--zone-id {zone_id_cli}")
+        if playlist_mood_cli:
+            cmd_parts.append(f"--mood {playlist_mood_cli}")
+        if auto_play_cli:
             cmd_parts.append("--auto-play")
         
         command = " ".join(cmd_parts)
@@ -848,8 +953,8 @@ def execute_fetch_data(username):
         # Fetch data
         df = fetcher.fetch_all_scrobbles(incremental=True)
         
-        if df.empty:
-            return {"success": False, "error": "No data fetched"}
+        if df is None or df.empty: # Added df is None check
+            return {"success": False, "error": "No data fetched or error during fetch."} # Modified error
         
         # Export to CSV format
         fetcher.export_to_formats(df, ['csv'])
@@ -865,6 +970,9 @@ def execute_fetch_data(username):
         }
         
     except Exception as e:
+        # Log the full error for debugging
+        import logging
+        logging.error(f"Exception in execute_fetch_data for {username}: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
 
 def execute_enrich_data(username):
@@ -872,58 +980,69 @@ def execute_enrich_data(username):
     
     try:
         # Import from the root directory where the file actually is
+        # This import might be problematic if streamlit_app.py is not in the project root
+        # For now, assuming it works as per original structure
         from musicbrainz_enricher import MusicBrainzEnricher
         
         # Load scrobbles
-        data_file = f"data/{username}_scrobbles.csv"
-        if not os.path.exists(data_file): # Added check for data_file existence
-            return {"success": False, "error": f"No scrobble data found for {username}. Please fetch data first."}
+        data_file = Path('data') / f"{username}_scrobbles.csv" # Use Path object
+        if not data_file.exists(): # Used Path object's exists()
+            return {"success": False, "error": f"No scrobble data found for {username} at {data_file}. Please fetch data first."}
         df = pd.read_csv(data_file)
         
         # Get unique tracks to avoid processing duplicates
-        unique_tracks = df[['artist', 'track']].drop_duplicates()
+        unique_tracks = df[['artist', 'track']].drop_duplicates().dropna() # Added dropna
         
+        if unique_tracks.empty:
+            return {"success": True, "processed_tracks": 0, "message": "No unique tracks to process."}
+
         # Initialize MusicBrainz enricher with research-based mood analysis
+        # These imports might also be problematic if not in PYTHONPATH
         from research_based_emotion_analyzer import ResearchBasedEmotionAnalyzer
         from research_based_mood_analyzer import ResearchBasedMoodAnalyzer
-        enricher = MusicBrainzEnricher()
-        emotion_analyzer = ResearchBasedEmotionAnalyzer()
-        mood_analyzer = ResearchBasedMoodAnalyzer()
+        enricher = MusicBrainzEnricher() # Assuming this has the necessary methods
+        # emotion_analyzer = ResearchBasedEmotionAnalyzer() # Not directly used in original snippet with enricher
+        mood_analyzer = ResearchBasedMoodAnalyzer() # Used for emotion_vector
         
         # Process with a reasonable limit for web interface
-        max_tracks_to_process = min(50, len(unique_tracks))  # Process up to 50 tracks for MusicBrainz
+        max_tracks_to_process = min(50, len(unique_tracks))
         
         # Convert to list of dictionaries for MusicBrainz enricher
         tracks_to_process = []
         for _, row in unique_tracks.head(max_tracks_to_process).iterrows():
             tracks_to_process.append({
                 'artist': row['artist'],
-                'title': row['track']
+                'title': row['track'] # 'track' is the correct column name from scrobbles
             })
         
-        # Enrich tracks using MusicBrainz
+        # Enrich tracks using MusicBrainz (assuming enrich_tracks_batch exists on MusicBrainzEnricher)
+        # The original code had `enricher.enrich_tracks_batch`, let's assume it's there.
+        if not hasattr(enricher, 'enrich_tracks_batch'):
+            st.error("MusicBrainzEnricher does not have `enrich_tracks_batch` method. Cannot proceed with enrichment.")
+            return {"success": False, "error": "Enricher method missing."}
+
         enriched_results = enricher.enrich_tracks_batch(tracks_to_process, max_tracks=max_tracks_to_process)
         
         # Convert results back to DataFrame format with advanced mood analysis
         enriched_data = []
         for track_key, enriched_info in enriched_results.items():
-            artist, title = track_key.split(' - ', 1)
-            
+            # track_key is usually "artist - title"
+            artist, title = track_key.split(' - ', 1) if ' - ' in track_key else (track_key, "Unknown")
+
             # Get research-based emotion analysis
-            basic_tags = enriched_info.get('musicbrainz_tags', [])
-            emotion_vector = mood_analyzer.analyze_track_emotion(artist, title)
+            emotion_vector = mood_analyzer.analyze_track_emotion(artist, title) # Assuming this method exists
             
             enriched_data.append({
                 'artist': artist,
                 'track': title,
                 'musicbrainz_tags': ', '.join(enriched_info.get('musicbrainz_tags', [])),
                 'musicbrainz_genres': ', '.join(enriched_info.get('musicbrainz_genres', [])),
-                'emotion_label': emotion_vector.to_mood_label(),
-                'valence': f"{emotion_vector.valence:+.2f}",
-                'arousal': f"{emotion_vector.arousal:+.2f}",
-                'dominance': f"{emotion_vector.dominance:+.2f}",
-                'emotion_confidence': f"{emotion_vector.confidence:.2f}",
-                'emotional_quadrant': _get_emotional_quadrant(emotion_vector),
+                'emotion_label': emotion_vector.to_mood_label() if emotion_vector else "N/A",
+                'valence': f"{emotion_vector.valence:+.2f}" if emotion_vector else "N/A",
+                'arousal': f"{emotion_vector.arousal:+.2f}" if emotion_vector else "N/A",
+                'dominance': f"{emotion_vector.dominance:+.2f}" if emotion_vector else "N/A",
+                'emotion_confidence': f"{emotion_vector.confidence:.2f}" if emotion_vector else "N/A",
+                'emotional_quadrant': _get_emotional_quadrant(emotion_vector) if emotion_vector else "N/A",
                 'simplified_mood': enriched_info.get('simplified_mood', 'neutral'),
                 'first_release_date': enriched_info.get('first_release_date'),
                 'country': enriched_info.get('country'),
@@ -933,31 +1052,41 @@ def execute_enrich_data(username):
                 'length': enriched_info.get('length')
             })
         
+        if not enriched_data:
+             return {"success": True, "processed_tracks": 0, "message": "No data was enriched."}
+
         enriched_df = pd.DataFrame(enriched_data)
         
         # Save results
-        output_file = f"data/{username}_enriched.csv"
+        output_file = Path('data') / f"{username}_enriched.csv" # Use Path object
         enriched_df.to_csv(output_file, index=False)
         
         return {
             "success": True,
             "processed_tracks": len(enriched_df),
             "total_unique_tracks": len(unique_tracks),
-            "output_file": output_file
+            "output_file": str(output_file) # Return string for consistency
         }
         
+    except ImportError as e:
+        st.error(f"Import error during enrichment: {e}. Please ensure all dependencies are installed and paths are correct.")
+        return {"success": False, "error": f"ImportError: {e}"}
     except Exception as e:
+        # Log the full error for debugging
+        import logging
+        logging.error(f"Exception in execute_enrich_data for {username}: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
 
-def _get_emotional_quadrant(emotion_vector):
+def _get_emotional_quadrant(emotion_vector): # Assuming emotion_vector can be None
     """Get emotional quadrant for display"""
+    if not emotion_vector: return "N/A" # Handle None case
     if emotion_vector.valence > 0 and emotion_vector.arousal > 0:
         return "High Energy Positive"
     elif emotion_vector.valence > 0 and emotion_vector.arousal < 0:
         return "Low Energy Positive"
     elif emotion_vector.valence < 0 and emotion_vector.arousal > 0:
         return "High Energy Negative"
-    else:
+    else: # Handles valence < 0 and arousal < 0, and cases where one is zero
         return "Low Energy Negative"
 
 def execute_analyze_data(username):
