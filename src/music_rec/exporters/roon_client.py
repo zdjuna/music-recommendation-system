@@ -108,19 +108,31 @@ class RoonClient:
             self.session = aiohttp.ClientSession()
             
             # Test HTTP connection first
-            async with self.session.get(f"{self.base_url}/ping") as response:
-                if response.status != 200:
-                    logger.error(f"Failed to ping Roon Core: {response.status}")
-                    return False
+            try:
+                async with self.session.get(f"{self.base_url}/ping", timeout=aiohttp.ClientTimeout(total=5)) as response:
+                    if response.status != 200:
+                        logger.error(f"Failed to ping Roon Core: {response.status}")
+                        await self.session.close()
+                        return False
+            except Exception as e:
+                logger.error(f"HTTP connection failed: {e}")
+                await self.session.close()
+                return False
             
             # Connect WebSocket
-            self.websocket = await websockets.connect(self.ws_url)
-            logger.info(f"Connected to Roon Core at {self.core_host}:{self.core_port}")
+            try:
+                self.websocket = await websockets.connect(self.ws_url, timeout=5)
+                logger.info(f"Connected to Roon Core at {self.core_host}:{self.core_port}")
+            except Exception as e:
+                logger.error(f"WebSocket connection failed: {e}")
+                await self.session.close()
+                return False
             
             # Authenticate
             auth_success = await self._authenticate()
             if not auth_success:
                 logger.error("Failed to authenticate with Roon Core")
+                await self.disconnect()
                 return False
             
             # Start listening for events
@@ -133,16 +145,26 @@ class RoonClient:
             
         except Exception as e:
             logger.error(f"Failed to connect to Roon Core: {e}")
+            await self.disconnect()
             return False
     
     async def disconnect(self):
         """Disconnect from Roon Core"""
-        if self.websocket:
-            await self.websocket.close()
-        if self.session:
-            await self.session.close()
+        try:
+            if self.websocket:
+                await self.websocket.close()
+        except:
+            pass
+        
+        try:
+            if self.session:
+                await self.session.close()
+        except:
+            pass
         
         self.authenticated = False
+        self.websocket = None
+        self.session = None
         logger.info("Disconnected from Roon Core")
     
     async def _authenticate(self) -> bool:
@@ -192,10 +214,10 @@ class RoonClient:
         }
         await self.websocket.send(json.dumps(zone_subscribe))
         
-        # Subscribe to transport events
+        # Subscribe to transport events  
         transport_subscribe = {
-            "verb": "SUBSCRIBE", 
-            "request_id": "transport_subscribe",
+            "verb": "SUBSCRIBE",
+            "request_id": "transport_subscribe", 
             "body": {
                 "subscription_key": "transport"
             }
@@ -283,6 +305,11 @@ class RoonClient:
         if not self.authenticated:
             raise Exception("Not authenticated with Roon Core")
         
+        # If we have cached zones, return them
+        if self.zones:
+            return list(self.zones.values())
+        
+        # Otherwise, request zone information
         request = {
             "verb": "REQUEST",
             "request_id": "get_zones",
@@ -293,7 +320,9 @@ class RoonClient:
         
         await self.websocket.send(json.dumps(request))
         
-        # Return cached zones for now
+        # Wait a moment for zone data to arrive
+        await asyncio.sleep(1.0)
+        
         return list(self.zones.values())
     
     async def create_playlist(self, 

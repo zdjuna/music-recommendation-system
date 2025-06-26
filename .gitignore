@@ -67,4 +67,26 @@ Thumbs.db
 
 # Temporary files
 *.tmp
-*.temp 
+*.temp
+
+# Cache files
+cache/
+.cache/
+.pytest_cache/
+
+# Generated files
+reports/
+models/*.pkl
+*.db
+
+# Archive (keep locally but don't commit)
+archive/
+
+# Test outputs
+htmlcov/
+.coverage
+coverage.xml
+
+# Build outputs
+*.wheel
+*.tar.gz 
