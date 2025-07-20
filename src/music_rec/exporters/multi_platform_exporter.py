@@ -549,7 +549,8 @@ class StreamlitExportHelper:
                 'spotify_redirect_uri': st.secrets.get('SPOTIFY_REDIRECT_URI'),
                 'youtube_music_headers': st.secrets.get('YOUTUBE_MUSIC_HEADERS')
             })
-        except Exception:
+        except Exception as e:
+            logging.warning(f"Failed to export to platform: {e}")
             pass
         
         return config
@@ -573,4 +574,4 @@ class StreamlitExportHelper:
                 if 'tracks_not_found' in result and result['tracks_not_found'] > 0:
                     st.warning(f"⚠️ {result['tracks_not_found']} tracks not found on {platform}")
             else:
-                st.error(f"❌ {platform.title()}: {result.get('error', 'Unknown error')}") 
+                st.error(f"❌ {platform.title()}: {result.get('error', 'Unknown error')}")  

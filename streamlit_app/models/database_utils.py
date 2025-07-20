@@ -32,7 +32,7 @@ def database_retry(max_retries: int = 3):
                     logger.error(f"Database operation failed: {e}")
                     raise e
             
-            raise last_error
+            raise Exception("All retry attempts failed") from last_error
         return wrapper
     return decorator
 
@@ -72,10 +72,14 @@ def get_database_info(db_path: str) -> Dict[str, Any]:
         table_counts = {}
         for table in tables:
             try:
-                cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", (table,))
+                if cursor.fetchone()[0] == 0:
+                    continue
+                cursor.execute(f"SELECT COUNT(*) FROM `{table}`")
                 count = cursor.fetchone()[0]
                 table_counts[table] = count
-            except:
+            except Exception as e:
+                logger.warning(f"Failed to count rows in table {table}: {e}")
                 table_counts[table] = 0
         
         conn.close()

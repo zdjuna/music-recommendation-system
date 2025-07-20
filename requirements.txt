@@ -76,3 +76,5 @@ websockets==15.0.1
 yarl==1.20.0
 ytmusicapi==1.10.3
 pytest>=8.0.0
+pytest-asyncio
+psutil>=5.9.0

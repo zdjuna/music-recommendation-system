@@ -87,7 +87,7 @@ class RealMusicAnalyzer:
                 'client_secret': self.spotify_client_secret
             }
             
-            response = requests.post(auth_url, data=auth_data, timeout=10)
+            response = requests.post(auth_url, data=auth_data, timeout=30)
             if response.status_code == 200:
                 self.spotify_token = response.json()['access_token']
                 logger.info("✅ Spotify token obtained")
@@ -111,7 +111,7 @@ class RealMusicAnalyzer:
                 'limit': 1
             }
             
-            response = requests.get(search_url, headers=headers, params=search_params, timeout=10)
+            response = requests.get(search_url, headers=headers, params=search_params, timeout=30)
             
             if response.status_code == 200:
                 data = response.json()
@@ -123,7 +123,7 @@ class RealMusicAnalyzer:
                     artist_response = requests.get(
                         f'https://api.spotify.com/v1/artists/{artist_id}',
                         headers=headers,
-                        timeout=10
+                        timeout=30
                     )
                     
                     artist_info = artist_response.json() if artist_response.status_code == 200 else {}
@@ -163,7 +163,7 @@ class RealMusicAnalyzer:
                 'format': 'json'
             }
             
-            response = requests.get(url, params=params, timeout=10)
+            response = requests.get(url, params=params, timeout=30)
             
             if response.status_code == 200:
                 data = response.json()
@@ -245,7 +245,7 @@ class RealMusicAnalyzer:
         if max(mood_score.values()) == 0:
             return 'unknown'
         
-        return max(mood_score, key=mood_score.get)
+        return max(mood_score.keys(), key=lambda k: mood_score[k])
     
     def classify_energy_level(self, spotify_info, lastfm_tags, mood):
         """Classify energy level based on available data"""
@@ -287,7 +287,7 @@ class RealMusicAnalyzer:
         if max(energy_indicators.values()) == 0:
             return 'medium'
         
-        return max(energy_indicators, key=energy_indicators.get)
+        return max(energy_indicators.keys(), key=lambda k: energy_indicators[k])
     
     def analyze_track(self, artist, track):
         """Comprehensive track analysis using real data sources"""
