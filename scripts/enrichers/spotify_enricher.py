@@ -130,7 +130,7 @@ class SpotifyAccessFixer:
                 'client_secret': self.client_secret
             }
             
-            auth_response = requests.post(auth_url, data=auth_data)
+            auth_response = requests.post(auth_url, data=auth_data, timeout=30)
             auth_response.raise_for_status()
             
             access_token = auth_response.json()['access_token']
@@ -145,7 +145,7 @@ class SpotifyAccessFixer:
                 'limit': 1
             }
             
-            search_response = requests.get(search_url, headers=headers, params=search_params)
+            search_response = requests.get(search_url, headers=headers, params=search_params, timeout=30)
             search_response.raise_for_status()
             
             search_data = search_response.json()
@@ -156,7 +156,7 @@ class SpotifyAccessFixer:
                 
                 # Test audio features directly
                 features_url = f'https://api.spotify.com/v1/audio-features/{track_id}'
-                features_response = requests.get(features_url, headers=headers)
+                features_response = requests.get(features_url, headers=headers, timeout=30)
                 
                 print(f"Audio features response status: {features_response.status_code}")
                 print(f"Audio features response: {features_response.text[:200]}...")
@@ -270,7 +270,7 @@ class WorkingSpotifyAnalyzer:
             'client_secret': self.client_secret
         }}
         
-        response = requests.post(auth_url, data=auth_data)
+        response = requests.post(auth_url, data=auth_data, timeout=30)
         response.raise_for_status()
         self.access_token = response.json()['access_token']
     
@@ -287,7 +287,7 @@ class WorkingSpotifyAnalyzer:
                 'limit': 1
             }}
             
-            search_response = requests.get(search_url, headers=headers, params=search_params)
+            search_response = requests.get(search_url, headers=headers, params=search_params, timeout=30)
             search_response.raise_for_status()
             
             search_data = search_response.json()
@@ -297,7 +297,7 @@ class WorkingSpotifyAnalyzer:
                 
                 # Get audio features
                 features_url = f'https://api.spotify.com/v1/audio-features/{{track_id}}'
-                features_response = requests.get(features_url, headers=headers)
+                features_response = requests.get(features_url, headers=headers, timeout=30)
                 
                 if features_response.status_code == 200:
                     features = features_response.json()
