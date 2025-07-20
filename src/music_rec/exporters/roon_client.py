@@ -153,13 +153,15 @@ class RoonClient:
         try:
             if self.websocket:
                 await self.websocket.close()
-        except:
+        except Exception as e:
+            logging.warning(f"Failed to close connection: {e}")
             pass
         
         try:
             if self.session:
                 await self.session.close()
-        except:
+        except Exception as e:
+            logging.warning(f"Failed to close connection: {e}")
             pass
         
         self.authenticated = False
@@ -521,4 +523,4 @@ class RoonClient:
         else:
             context["time_context"] = "night"
         
-        return context 
+        return context  

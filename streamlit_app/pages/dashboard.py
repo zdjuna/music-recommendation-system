@@ -4,6 +4,7 @@ Main dashboard page
 
 import streamlit as st
 import pandas as pd
+import logging
 from ..utils.config import config
 from ..models.database import db
 from ..components.status_dashboard import render_system_status, render_quick_actions, render_welcome_message
@@ -17,7 +18,8 @@ def load_user_data(username: str):
         stats = db.get_user_stats(username)
         if stats['total_scrobbles'] > 0:
             return {'source': 'database', 'stats': stats}
-    except Exception:
+    except Exception as e:
+        logging.warning(f"Failed to load database stats: {e}")
         pass
     
     # Fallback to CSV files
