@@ -220,6 +220,8 @@ class AIInsightGenerator:
         genre_evolution = patterns.get('genre_evolution', {})
         seasonal = patterns.get('seasonal', {})
         summary = patterns.get('summary_stats', {})
+        yearly_evolution = patterns.get('yearly_evolution', {})
+        musical_phases = patterns.get('musical_phases', {})
         
         prompt = f"""
         Analyze how this person's musical taste has evolved over time:
@@ -228,6 +230,13 @@ class AIInsightGenerator:
         - Years of data: {genre_evolution.get('total_timespan_years', 0)}
         - Yearly diversity changes: {genre_evolution.get('yearly_diversity_index', {})}
         - Most consistent artists: {genre_evolution.get('most_consistent_artists', [])}
+        - Most active year: {yearly_evolution.get('most_active_year', 'Unknown')}
+        - Total years analyzed: {yearly_evolution.get('total_years', 0)}
+
+        Musical Phases:
+        - Total phases detected: {musical_phases.get('total_phases', 0)}
+        - Current phase: {musical_phases.get('current_phase', {}).get('type', 'Unknown')}
+        - Phase types: {list(musical_phases.get('phase_summary', {}).keys())}
 
         Seasonal Patterns:
         - Preferred season: {seasonal.get('preferred_season', 'Unknown')}
@@ -238,7 +247,7 @@ class AIInsightGenerator:
         - Date range: {summary.get('date_range_days', 0)} days
         - Data completeness: {summary.get('data_completeness', 'Unknown')}
 
-        Describe their musical journey and evolution. What trends do you see? How has their taste changed or stayed consistent? Be engaging and insightful about their musical growth.
+        Describe their musical journey and evolution. What trends do you see? How has their taste changed or stayed consistent? What do the musical phases reveal about their listening evolution? Be engaging and insightful about their musical growth over 15+ years.
         """
         
         return prompt.strip()
@@ -457,4 +466,4 @@ Session Length: {temporal.get('average_session_length', 0)} tracks per listening
         for task in tasks:
             results.update(task)
         
-        return results 
+        return results  

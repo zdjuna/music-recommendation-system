@@ -54,7 +54,7 @@ class MusimapEnricher:
         }
         
         try:
-            response = requests.post(auth_url, data=auth_data)
+            response = requests.post(auth_url, data=auth_data, timeout=30)
             response.raise_for_status()
             
             token_data = response.json()
@@ -366,4 +366,4 @@ def test_musimap_enricher():
             print("❌ Failed to enrich")
 
 if __name__ == "__main__":
-    test_musimap_enricher() 
+    test_musimap_enricher()  
