@@ -369,6 +369,47 @@ class DatabaseManager:
                 })
             
             return tracks
+    
+    def get_user_scrobbles_dataframe(self, username: str) -> pd.DataFrame:
+        """Get user scrobbles as a pandas DataFrame for analysis"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('SELECT id FROM users WHERE username = ?', (username,))
+            result = cursor.fetchone()
+            
+            if not result:
+                return pd.DataFrame()
+            
+            user_id = result[0]
+            
+            query = '''
+                SELECT 
+                    s.timestamp,
+                    t.artist,
+                    t.track,
+                    t.album,
+                    t.id as track_id
+                FROM scrobbles s
+                JOIN tracks t ON s.track_id = t.id
+                WHERE s.user_id = ?
+                ORDER BY s.timestamp DESC
+            '''
+            
+            df = pd.read_sql_query(query, conn, params=(user_id,))
+            
+            if not df.empty:
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                
+                df['date'] = df['timestamp'].dt.date
+                df['year'] = df['timestamp'].dt.year
+                df['month'] = df['timestamp'].dt.month
+                df['day'] = df['timestamp'].dt.day
+                df['hour'] = df['timestamp'].dt.hour
+                df['weekday'] = df['timestamp'].dt.dayofweek
+                df['quarter'] = df['timestamp'].dt.quarter
+            
+            return df
 
 # Global database instance
 db = DatabaseManager()
