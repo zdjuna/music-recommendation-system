@@ -95,6 +95,7 @@ class AIInsightGenerator:
         insights.update(self._generate_personality_insights(patterns))
         insights.update(self._generate_behavioral_insights(patterns))
         insights.update(self._generate_trend_insights(patterns))
+        insights.update(self._generate_temporal_evolution_insights(patterns))
         insights.update(self._generate_recommendation_insights(patterns))
         
         return insights
@@ -219,6 +220,9 @@ class AIInsightGenerator:
         
         genre_evolution = patterns.get('genre_evolution', {})
         seasonal = patterns.get('seasonal', {})
+        musical_phases = patterns.get('musical_phases', {})
+        year_over_year = patterns.get('year_over_year_evolution', {})
+        yearly_evolution = patterns.get('yearly_evolution', {})
         summary = patterns.get('summary_stats', {})
         
         prompt = f"""
@@ -228,6 +232,13 @@ class AIInsightGenerator:
         - Years of data: {genre_evolution.get('total_timespan_years', 0)}
         - Yearly diversity changes: {genre_evolution.get('yearly_diversity_index', {})}
         - Most consistent artists: {genre_evolution.get('most_consistent_artists', [])}
+        - Most active year: {yearly_evolution.get('most_active_year', 'Unknown')}
+        - Total years analyzed: {yearly_evolution.get('total_years', 0)}
+
+        Musical Phases:
+        - Total phases detected: {musical_phases.get('total_phases', 0)}
+        - Current phase: {musical_phases.get('current_phase', {}).get('type', 'Unknown')}
+        - Phase types: {list(musical_phases.get('phase_summary', {}).keys())}
 
         Seasonal Patterns:
         - Preferred season: {seasonal.get('preferred_season', 'Unknown')}
@@ -238,7 +249,7 @@ class AIInsightGenerator:
         - Date range: {summary.get('date_range_days', 0)} days
         - Data completeness: {summary.get('data_completeness', 'Unknown')}
 
-        Describe their musical journey and evolution. What trends do you see? How has their taste changed or stayed consistent? Be engaging and insightful about their musical growth.
+        Describe their musical journey and evolution. What trends do you see? How has their taste changed or stayed consistent? What do the musical phases reveal about their listening evolution? Be engaging and insightful about their musical growth over 15+ years.
         """
         
         return prompt.strip()
@@ -274,18 +285,18 @@ class AIInsightGenerator:
         return prompt.strip()
     
     def _call_openai(self, prompt: str, max_tokens: int = 3000) -> str:
-        """Call OpenAI API using the modern Responses API."""
+        """Call OpenAI API using the modern Chat Completions API."""
         try:
-            # System prompt + user prompt combined for Responses API
-            full_input = f"You are a music psychology expert who provides insightful, personal analysis of listening patterns.\n\n{prompt}"
-            
-            response = self.openai_client.responses.create(
-                model="gpt-4.1",
-                input=full_input,
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a music psychology expert who provides insightful, personal analysis of listening patterns."},
+                    {"role": "user", "content": prompt}
+                ],
                 max_tokens=max_tokens,
                 temperature=0.7
             )
-            return response.output.content.strip()
+            return response.choices[0].message.content.strip()
         except Exception as e:
             logger.error(f"OpenAI API error: {e}")
             return f"AI analysis temporarily unavailable: {str(e)}"
@@ -457,4 +468,52 @@ Session Length: {temporal.get('average_session_length', 0)} tracks per listening
         for task in tasks:
             results.update(task)
         
-        return results 
+        return results
+    
+    def _generate_temporal_evolution_insights(self, patterns: Dict) -> Dict[str, str]:
+        """Generate insights about temporal evolution and musical phases."""
+        
+        yearly_evolution = patterns.get('yearly_evolution', {})
+        if not yearly_evolution:
+            return {}
+        
+        prompt = self._build_temporal_evolution_prompt(yearly_evolution)
+        
+        if self.openai_client:
+            response = self._call_openai(prompt, max_tokens=self.TOKEN_LIMITS['trends'])
+        elif self.anthropic_client:
+            response = self._call_anthropic(prompt, max_tokens=self.TOKEN_LIMITS['trends'])
+        else:
+            return {}
+        
+        return {"temporal_evolution": response}
+    
+    def _build_temporal_evolution_prompt(self, yearly_evolution: Dict) -> str:
+        """Build prompt for temporal evolution analysis."""
+        
+        yearly_stats = yearly_evolution.get('yearly_stats', {})
+        yoy_changes = yearly_evolution.get('year_over_year_changes', {})
+        musical_phases = yearly_evolution.get('musical_phases', [])
+        
+        prompt = f"""
+        Analyze this person's musical evolution over time and identify key phases in their listening journey:
+
+        Year-over-Year Statistics:
+        {json.dumps(yearly_stats, indent=2)}
+
+        Year-over-Year Changes:
+        {json.dumps(yoy_changes, indent=2)}
+
+        Detected Musical Phases:
+        {json.dumps(musical_phases, indent=2)}
+
+        Provide insights about:
+        1. How their music taste has evolved over the years
+        2. Key turning points or phases in their musical journey
+        3. Patterns in their listening behavior changes
+        4. What these changes suggest about their life stages or interests
+
+        Be engaging and tell the story of their musical evolution. Focus on meaningful patterns and what they reveal about the person's growth and changes over time.
+        """
+        
+        return prompt.strip()       

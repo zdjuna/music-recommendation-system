@@ -8,7 +8,7 @@ import logging
 from ..utils.config import config
 from ..models.database import db
 from ..components.status_dashboard import render_system_status, render_quick_actions, render_welcome_message
-from ..components.charts import render_charts_grid
+from ..components.charts import render_charts_grid, create_yearly_evolution_chart, create_musical_phases_chart, create_temporal_heatmap_enhanced
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_user_data(username: str):
@@ -123,8 +123,53 @@ def show_dashboard():
             st.dataframe(recent_tracks, use_container_width=True)
         
         elif user_data['source'] == 'database':
-            st.info("📊 Data loaded from database. Charts coming soon!")
-            st.json(user_data['stats'])
+            with st.spinner("Loading scrobble data from database..."):
+                scrobbles_df = db.get_user_scrobbles_dataframe(username)
+            
+            if not scrobbles_df.empty:
+                from src.music_rec.analyzers.pattern_analyzer import PatternAnalyzer
+                
+                with st.spinner("Analyzing your musical patterns..."):
+                    analyzer = PatternAnalyzer(scrobbles_df)
+                    patterns = analyzer.analyze_all_patterns()
+                
+                st.subheader("🎭 Temporal Analytics & Musical Evolution")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    yearly_fig = create_yearly_evolution_chart(patterns)
+                    st.plotly_chart(yearly_fig, use_container_width=True)
+                
+                with col2:
+                    phases_fig = create_musical_phases_chart(patterns)
+                    st.plotly_chart(phases_fig, use_container_width=True)
+                
+                temporal_heatmap = create_temporal_heatmap_enhanced(scrobbles_df)
+                st.plotly_chart(temporal_heatmap, use_container_width=True)
+                
+                render_charts_grid(scrobbles_df, None)
+                
+                st.subheader("🧠 AI-Powered Musical Insights")
+                with st.spinner("Generating AI insights..."):
+                    from src.music_rec.analyzers.ai_insights import AIInsightGenerator
+                    ai_generator = AIInsightGenerator()
+                    insights = ai_generator.generate_comprehensive_insights(patterns)
+                    
+                    if 'musical_evolution' in insights:
+                        st.markdown("### 📈 Your Musical Evolution")
+                        st.write(insights['musical_evolution'])
+                    
+                    if 'musical_personality' in insights:
+                        st.markdown("### 🎭 Your Musical Personality")
+                        st.write(insights['musical_personality'])
+                
+                st.subheader("🎵 Recent Activity")
+                recent_tracks = scrobbles_df.head(10)[['artist', 'track', 'timestamp']]
+                recent_tracks['timestamp'] = recent_tracks['timestamp'].dt.strftime('%Y-%m-%d %H:%M')
+                st.dataframe(recent_tracks, use_container_width=True)
+            else:
+                st.info("📊 Data loaded from database but no scrobbles found for analysis.")
+                st.json(user_data['stats'])
         
         # Data source indicator
         st.markdown("---")
