@@ -81,12 +81,15 @@ class PatternAnalyzer:
             'discovery': self.analyze_discovery_patterns(),
             'artist_loyalty': self.analyze_artist_patterns(),
             'genre_evolution': self.analyze_genre_evolution(),
+            'yearly_evolution': self.analyze_yearly_evolution(),
+            'musical_phases': self.detect_musical_phases(),
             'listening_intensity': self.analyze_listening_intensity(),
             'repetition': self.analyze_repetition_patterns(),
             'seasonal': self.analyze_seasonal_patterns(),
-            'summary_stats': self.get_summary_statistics(),
-            'musical_phases': self.analyze_musical_phases(),
-            'year_over_year_evolution': self.analyze_year_over_year_evolution()
+            'yearly_evolution': self.analyze_yearly_evolution(),
+            'enhanced_musical_phases': self.analyze_musical_phases(),
+            'year_over_year_evolution': self.analyze_year_over_year_evolution(),
+            'summary_stats': self.get_summary_statistics()
         }
         
         logger.info("Pattern analysis complete")
@@ -454,7 +457,7 @@ class PatternAnalyzer:
             else:
                 insights['artist_style'] = "You're loyal to your favorite artists and dive deep into their catalogs"
         
-        return insights   
+        return insights
     
     def analyze_musical_phases(self) -> Dict:
         """Detect musical phases based on listening pattern changes"""
@@ -631,4 +634,128 @@ class PatternAnalyzer:
             'pattern': pattern,
             'stability': stability,
             'trend_distribution': dict(trend_counts)
-        }    
+        }
+    
+    def analyze_yearly_evolution(self) -> Dict:
+        """Analyze year-over-year changes in listening patterns."""
+        if self.data.empty:
+            return {}
+        
+        yearly_stats = {}
+        years = sorted(self.data['year'].unique())
+        
+        for year in years:
+            year_data = self.data[self.data['year'] == year]
+            yearly_stats[int(year)] = {
+                'total_plays': len(year_data),
+                'unique_artists': year_data['artist'].nunique(),
+                'unique_tracks': year_data['track_id'].nunique(),
+                'avg_daily_plays': len(year_data) / 365,
+                'top_artist': year_data['artist'].value_counts().index[0] if not year_data.empty else None,
+                'artist_diversity': self._calculate_diversity_index(year_data['artist'])
+            }
+        
+        yoy_changes = {}
+        for i in range(1, len(years)):
+            prev_year, curr_year = years[i-1], years[i]
+            prev_stats, curr_stats = yearly_stats[prev_year], yearly_stats[curr_year]
+            
+            yoy_changes[f"{prev_year}-{curr_year}"] = {
+                'plays_change': ((curr_stats['total_plays'] - prev_stats['total_plays']) / prev_stats['total_plays'] * 100) if prev_stats['total_plays'] > 0 else 0,
+                'artist_change': ((curr_stats['unique_artists'] - prev_stats['unique_artists']) / prev_stats['unique_artists'] * 100) if prev_stats['unique_artists'] > 0 else 0,
+                'diversity_change': curr_stats['artist_diversity'] - prev_stats['artist_diversity']
+            }
+        
+        return {
+            'yearly_stats': yearly_stats,
+            'year_over_year_changes': yoy_changes,
+            'musical_phases': self._detect_musical_phases()
+        }
+    
+    def _detect_musical_phases(self) -> List[Dict]:
+        """Detect distinct musical phases in listening history."""
+        if self.data.empty:
+            return []
+        
+        self.data['year_quarter'] = self.data['year'].astype(str) + '-Q' + self.data['quarter'].astype(str)
+        quarterly_stats = []
+        
+        for quarter in sorted(self.data['year_quarter'].unique()):
+            quarter_data = self.data[self.data['year_quarter'] == quarter]
+            if len(quarter_data) < 10:
+                continue
+                
+            stats = {
+                'period': quarter,
+                'total_plays': len(quarter_data),
+                'unique_artists': quarter_data['artist'].nunique(),
+                'top_genres': self._estimate_genres(quarter_data),
+                'avg_session_length': self._calculate_avg_session_length(quarter_data),
+                'discovery_rate': len(quarter_data.drop_duplicates('track_id')) / len(quarter_data)
+            }
+            quarterly_stats.append(stats)
+        
+        phases = []
+        current_phase = None
+        
+        for i, stats in enumerate(quarterly_stats):
+            if i == 0:
+                current_phase = {
+                    'start_period': stats['period'],
+                    'characteristics': stats,
+                    'periods': [stats['period']]
+                }
+            else:
+                prev_stats = quarterly_stats[i-1]
+                plays_change = abs(stats['total_plays'] - prev_stats['total_plays']) / prev_stats['total_plays'] if prev_stats['total_plays'] > 0 else 0
+                discovery_change = abs(stats['discovery_rate'] - prev_stats['discovery_rate'])
+                
+                if plays_change > 0.5 or discovery_change > 0.3:
+                    current_phase['end_period'] = prev_stats['period']
+                    phases.append(current_phase)
+                    
+                    current_phase = {
+                        'start_period': stats['period'],
+                        'characteristics': stats,
+                        'periods': [stats['period']]
+                    }
+                else:
+                    current_phase['periods'].append(stats['period'])
+        
+        if current_phase:
+            current_phase['end_period'] = quarterly_stats[-1]['period']
+            phases.append(current_phase)
+        
+        return phases
+    
+    def _calculate_diversity_index(self, series) -> float:
+        """Calculate Simpson's diversity index."""
+        counts = series.value_counts()
+        total = len(series)
+        return 1 - sum((count/total)**2 for count in counts) if total > 0 else 0
+    
+    def _estimate_genres(self, data) -> List[str]:
+        """Estimate genres based on artist patterns (placeholder)."""
+        top_artists = data['artist'].value_counts().head(3).index.tolist()
+        return top_artists
+    
+    def _calculate_avg_session_length(self, data) -> float:
+        """Calculate average session length for given data."""
+        sessions = []
+        current_session = []
+        
+        for i, row in data.iterrows():
+            if not current_session:
+                current_session = [row['datetime']]
+            else:
+                time_diff = (row['datetime'] - current_session[-1]).total_seconds() / 3600
+                if time_diff > 1:
+                    sessions.append(len(current_session))
+                    current_session = [row['datetime']]
+                else:
+                    current_session.append(row['datetime'])
+        
+        if current_session:
+            sessions.append(len(current_session))
+        
+        return np.mean(sessions) if sessions else 0       
