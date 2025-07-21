@@ -225,51 +225,51 @@ def render_charts_grid(df: pd.DataFrame, enriched_df: Optional[pd.DataFrame] = N
         if mood_fig:
             st.plotly_chart(mood_fig, use_container_width=True)
 
-@st.cache_data(ttl=1800)  # Cache for 30 minutes
+@st.cache_data(ttl=1800)
 def create_yearly_evolution_chart(patterns: Dict) -> go.Figure:
     """Create year-over-year evolution chart"""
-    yearly_evolution = patterns.get('yearly_evolution', {})
-    yearly_stats = yearly_evolution.get('yearly_stats', {})
+    yearly_data = patterns.get('yearly_evolution', {}).get('yearly_stats', {})
     
-    if not yearly_stats:
+    if not yearly_data:
         return go.Figure()
     
-    years = list(yearly_stats.keys())
-    plays = [stats['total_plays'] for stats in yearly_stats.values()]
-    artists = [stats['unique_artists'] for stats in yearly_stats.values()]
-    diversity = [stats['artist_diversity'] for stats in yearly_stats.values()]
+    years = sorted(yearly_data.keys())
+    scrobbles = [yearly_data[year]['total_scrobbles'] for year in years]
+    artists = [yearly_data[year]['unique_artists'] for year in years]
+    diversity = [yearly_data[year]['artist_diversity'] for year in years]
     
     fig = make_subplots(
         rows=2, cols=2,
-        subplot_titles=('Total Plays', 'Unique Artists', 'Artist Diversity', 'Year-over-Year Changes'),
+        subplot_titles=('Total Scrobbles by Year', 'Unique Artists by Year', 
+                       'Artist Diversity Index', 'Discovery Rate by Year'),
         specs=[[{"secondary_y": False}, {"secondary_y": False}],
                [{"secondary_y": False}, {"secondary_y": False}]]
     )
     
     fig.add_trace(
-        go.Scatter(x=years, y=plays, mode='lines+markers', name='Total Plays', line=dict(color='#667eea')),
+        go.Scatter(x=years, y=scrobbles, mode='lines+markers', name='Scrobbles',
+                  line=dict(color='#667eea', width=3), marker=dict(size=8)),
         row=1, col=1
     )
     
     fig.add_trace(
-        go.Scatter(x=years, y=artists, mode='lines+markers', name='Unique Artists', line=dict(color='#764ba2')),
+        go.Scatter(x=years, y=artists, mode='lines+markers', name='Artists',
+                  line=dict(color='#e74c3c', width=3), marker=dict(size=8)),
         row=1, col=2
     )
     
     fig.add_trace(
-        go.Scatter(x=years, y=diversity, mode='lines+markers', name='Artist Diversity', line=dict(color='#e74c3c')),
+        go.Scatter(x=years, y=diversity, mode='lines+markers', name='Diversity',
+                  line=dict(color='#2ecc71', width=3), marker=dict(size=8)),
         row=2, col=1
     )
     
-    yoy_changes = yearly_evolution.get('year_over_year_changes', {})
-    if yoy_changes:
-        periods = list(yoy_changes.keys())
-        plays_changes = [change['plays_change'] for change in yoy_changes.values()]
-        
-        fig.add_trace(
-            go.Bar(x=periods, y=plays_changes, name='Plays Change %', marker_color='#f39c12'),
-            row=2, col=2
-        )
+    discovery_rates = [yearly_data[year]['discovery_rate'] for year in years]
+    fig.add_trace(
+        go.Scatter(x=years, y=discovery_rates, mode='lines+markers', name='Discovery Rate',
+                  line=dict(color='#f39c12', width=3), marker=dict(size=8)),
+        row=2, col=2
+    )
     
     fig.update_layout(
         title="📈 Your Musical Evolution Over Time",
@@ -280,52 +280,70 @@ def create_yearly_evolution_chart(patterns: Dict) -> go.Figure:
     
     return fig
 
-@st.cache_data(ttl=1800)  # Cache for 30 minutes
-def create_musical_phases_timeline(patterns: Dict) -> go.Figure:
-    """Create musical phases timeline visualization"""
-    yearly_evolution = patterns.get('yearly_evolution', {})
-    musical_phases = yearly_evolution.get('musical_phases', [])
+@st.cache_data(ttl=1800)
+def create_musical_phases_chart(patterns: Dict) -> go.Figure:
+    """Create musical phases timeline chart"""
+    phases_data = patterns.get('musical_phases', {}).get('phases', [])
     
-    if not musical_phases:
+    if not phases_data:
         return go.Figure()
     
     fig = go.Figure()
     
-    colors = ['#667eea', '#764ba2', '#e74c3c', '#f39c12', '#27ae60', '#8e44ad']
+    colors = {'Exploration Phase': '#e74c3c', 'Focused Phase': '#3498db', 
+             'Intensive Phase': '#f39c12', 'Stable Phase': '#2ecc71'}
     
-    for i, phase in enumerate(musical_phases):
-        start_period = phase['start_period']
-        end_period = phase['end_period']
-        characteristics = phase['characteristics']
-        
-        start_year, start_quarter = start_period.split('-Q')
-        end_year, end_quarter = end_period.split('-Q')
-        
-        start_date = f"{start_year}-{int(start_quarter)*3-2:02d}-01"
-        end_date = f"{end_year}-{int(end_quarter)*3:02d}-28"
-        
+    for i, phase in enumerate(phases_data):
         fig.add_trace(go.Scatter(
-            x=[start_date, end_date],
+            x=[phase['start'], phase['end']],
             y=[i, i],
             mode='lines+markers',
-            name=f'Phase {i+1}',
-            line=dict(color=colors[i % len(colors)], width=8),
-            marker=dict(size=10),
-            hovertemplate=f"<b>Phase {i+1}</b><br>" +
-                         f"Period: {start_period} to {end_period}<br>" +
-                         f"Avg Plays: {characteristics.get('total_plays', 0)}<br>" +
-                         f"Discovery Rate: {characteristics.get('discovery_rate', 0):.2f}<br>" +
-                         "<extra></extra>"
+            name=phase['type'],
+            line=dict(color=colors.get(phase['type'], '#95a5a6'), width=8),
+            marker=dict(size=12),
+            hovertemplate=f"<b>{phase['type']}</b><br>{phase['description']}<br>Period: {phase['start']} to {phase['end']}<extra></extra>"
         ))
     
     fig.update_layout(
-        title="🎭 Your Musical Phases Timeline",
+        title="🎭 Your Musical Phases Over Time",
         xaxis_title="Time Period",
-        yaxis_title="Musical Phase",
+        yaxis_title="Musical Phases",
         height=400,
         font=dict(family="Arial", size=12),
-        yaxis=dict(tickmode='array', tickvals=list(range(len(musical_phases))), 
-                  ticktext=[f'Phase {i+1}' for i in range(len(musical_phases))])
+        yaxis=dict(tickmode='array', tickvals=list(range(len(phases_data))), 
+                  ticktext=[f"Phase {i+1}" for i in range(len(phases_data))])
+    )
+    
+    return fig
+
+@st.cache_data(ttl=1800)
+def create_temporal_heatmap_enhanced(df: pd.DataFrame) -> go.Figure:
+    """Create enhanced temporal heatmap with year progression"""
+    if df is None or df.empty:
+        return go.Figure()
+    
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df['hour'] = df['timestamp'].dt.hour
+    df['year'] = df['timestamp'].dt.year
+    
+    heatmap_data = df.groupby(['year', 'hour']).size().reset_index(name='count')
+    heatmap_pivot = heatmap_data.pivot(index='year', columns='hour', values='count').fillna(0)
+    
+    fig = go.Figure(data=go.Heatmap(
+        z=heatmap_pivot.values,
+        x=[f"{h:02d}:00" for h in range(24)],
+        y=heatmap_pivot.index,
+        colorscale='Viridis',
+        showscale=True,
+        colorbar=dict(title="Tracks Played")
+    ))
+    
+    fig.update_layout(
+        title="🕐 Listening Patterns: Years vs Hours",
+        xaxis_title="Hour of Day",
+        yaxis_title="Year",
+        font=dict(family="Arial", size=12),
+        height=500
     )
     
     return fig

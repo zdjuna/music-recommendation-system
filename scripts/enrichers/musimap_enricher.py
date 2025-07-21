@@ -366,4 +366,4 @@ def test_musimap_enricher():
             print("❌ Failed to enrich")
 
 if __name__ == "__main__":
-    test_musimap_enricher()      
+    test_musimap_enricher()

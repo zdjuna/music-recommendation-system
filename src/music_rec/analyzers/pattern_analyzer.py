@@ -81,6 +81,8 @@ class PatternAnalyzer:
             'discovery': self.analyze_discovery_patterns(),
             'artist_loyalty': self.analyze_artist_patterns(),
             'genre_evolution': self.analyze_genre_evolution(),
+            'yearly_evolution': self.analyze_yearly_evolution(),
+            'musical_phases': self.detect_musical_phases(),
             'listening_intensity': self.analyze_listening_intensity(),
             'repetition': self.analyze_repetition_patterns(),
             'seasonal': self.analyze_seasonal_patterns(),
@@ -577,4 +579,4 @@ class PatternAnalyzer:
         if current_session:
             sessions.append(len(current_session))
         
-        return np.mean(sessions) if sessions else 0   
+        return np.mean(sessions) if sessions else 0     
