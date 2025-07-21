@@ -281,4 +281,4 @@ def show_temporal_analytics():
     
     with col3:
         if st.button("📄 Generate Report"):
-from streamlit_app.utils.config import
+            st.info("Report generation functionality coming soon!")
