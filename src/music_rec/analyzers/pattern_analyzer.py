@@ -86,6 +86,7 @@ class PatternAnalyzer:
             'listening_intensity': self.analyze_listening_intensity(),
             'repetition': self.analyze_repetition_patterns(),
             'seasonal': self.analyze_seasonal_patterns(),
+            'yearly_evolution': self.analyze_yearly_evolution(),
             'summary_stats': self.get_summary_statistics()
         }
         
@@ -456,7 +457,7 @@ class PatternAnalyzer:
         return insights
     
     def analyze_yearly_evolution(self) -> Dict:
-        """Analyze year-over-year evolution of listening patterns."""
+        """Analyze year-over-year changes in listening patterns."""
         if self.data.empty:
             return {}
         
@@ -466,94 +467,116 @@ class PatternAnalyzer:
         for year in years:
             year_data = self.data[self.data['year'] == year]
             yearly_stats[int(year)] = {
-                'total_scrobbles': len(year_data),
+                'total_plays': len(year_data),
                 'unique_artists': year_data['artist'].nunique(),
                 'unique_tracks': year_data['track_id'].nunique(),
+                'avg_daily_plays': len(year_data) / 365,
                 'top_artist': year_data['artist'].value_counts().index[0] if not year_data.empty else None,
-                'discovery_rate': len(year_data['track_id'].value_counts()[year_data['track_id'].value_counts() == 1]) / len(year_data) * 100 if len(year_data) > 0 else 0,
-                'artist_diversity': 1 - sum((count/len(year_data))**2 for count in year_data['artist'].value_counts()) if len(year_data) > 0 else 0
+                'artist_diversity': self._calculate_diversity_index(year_data['artist'])
             }
         
-        evolution_metrics = {}
-        for i, year in enumerate(years[1:], 1):
-            prev_year = years[i-1]
-            current = yearly_stats[year]
-            previous = yearly_stats[prev_year]
+        yoy_changes = {}
+        for i in range(1, len(years)):
+            prev_year, curr_year = years[i-1], years[i]
+            prev_stats, curr_stats = yearly_stats[prev_year], yearly_stats[curr_year]
             
-            evolution_metrics[f"{prev_year}-{year}"] = {
-                'scrobbles_change': ((current['total_scrobbles'] - previous['total_scrobbles']) / previous['total_scrobbles'] * 100) if previous['total_scrobbles'] > 0 else 0,
-                'artist_diversity_change': current['artist_diversity'] - previous['artist_diversity'],
-                'discovery_rate_change': current['discovery_rate'] - previous['discovery_rate']
+            yoy_changes[f"{prev_year}-{curr_year}"] = {
+                'plays_change': ((curr_stats['total_plays'] - prev_stats['total_plays']) / prev_stats['total_plays'] * 100) if prev_stats['total_plays'] > 0 else 0,
+                'artist_change': ((curr_stats['unique_artists'] - prev_stats['unique_artists']) / prev_stats['unique_artists'] * 100) if prev_stats['unique_artists'] > 0 else 0,
+                'diversity_change': curr_stats['artist_diversity'] - prev_stats['artist_diversity']
             }
         
         return {
             'yearly_stats': yearly_stats,
-            'evolution_metrics': evolution_metrics,
-            'total_years': len(years),
-            'most_active_year': max(yearly_stats.keys(), key=lambda y: yearly_stats[y]['total_scrobbles']) if yearly_stats else None
+            'year_over_year_changes': yoy_changes,
+            'musical_phases': self._detect_musical_phases()
         }
     
-    def detect_musical_phases(self) -> Dict:
-        """Detect distinct musical phases based on listening pattern changes."""
+    def _detect_musical_phases(self) -> List[Dict]:
+        """Detect distinct musical phases in listening history."""
         if self.data.empty:
-            return {}
+            return []
         
         self.data['year_quarter'] = self.data['year'].astype(str) + '-Q' + self.data['quarter'].astype(str)
-        quarters = sorted(self.data['year_quarter'].unique())
+        quarterly_stats = []
         
-        phase_metrics = []
-        for quarter in quarters:
+        for quarter in sorted(self.data['year_quarter'].unique()):
             quarter_data = self.data[self.data['year_quarter'] == quarter]
-            if len(quarter_data) < 10:
+            if len(quarter_data) < 10:  # Skip quarters with too little data
                 continue
                 
-            metrics = {
+            stats = {
                 'period': quarter,
-                'artist_diversity': 1 - sum((count/len(quarter_data))**2 for count in quarter_data['artist'].value_counts()),
-                'discovery_rate': len(quarter_data['track_id'].value_counts()[quarter_data['track_id'].value_counts() == 1]) / len(quarter_data),
-                'listening_intensity': len(quarter_data) / 90,
-                'top_genre_concentration': quarter_data['artist'].value_counts().head(5).sum() / len(quarter_data)
+                'total_plays': len(quarter_data),
+                'unique_artists': quarter_data['artist'].nunique(),
+                'top_genres': self._estimate_genres(quarter_data),
+                'avg_session_length': self._calculate_avg_session_length(quarter_data),
+                'discovery_rate': len(quarter_data.drop_duplicates('track_id')) / len(quarter_data)
             }
-            phase_metrics.append(metrics)
+            quarterly_stats.append(stats)
         
         phases = []
-        current_phase = {'start': quarters[0], 'characteristics': phase_metrics[0]} if phase_metrics else None
+        current_phase = None
         
-        for i, metrics in enumerate(phase_metrics[1:], 1):
-            prev_metrics = phase_metrics[i-1]
-            
-            diversity_change = abs(metrics['artist_diversity'] - prev_metrics['artist_diversity'])
-            discovery_change = abs(metrics['discovery_rate'] - prev_metrics['discovery_rate'])
-            intensity_change = abs(metrics['listening_intensity'] - prev_metrics['listening_intensity'])
-            
-            if diversity_change > 0.2 or discovery_change > 0.2 or intensity_change > 50:
-                if current_phase:
-                    current_phase['end'] = quarters[i-1]
+        for i, stats in enumerate(quarterly_stats):
+            if i == 0:
+                current_phase = {
+                    'start_period': stats['period'],
+                    'characteristics': stats,
+                    'periods': [stats['period']]
+                }
+            else:
+                prev_stats = quarterly_stats[i-1]
+                plays_change = abs(stats['total_plays'] - prev_stats['total_plays']) / prev_stats['total_plays'] if prev_stats['total_plays'] > 0 else 0
+                discovery_change = abs(stats['discovery_rate'] - prev_stats['discovery_rate'])
+                
+                if plays_change > 0.5 or discovery_change > 0.3:
+                    current_phase['end_period'] = prev_stats['period']
                     phases.append(current_phase)
-                current_phase = {'start': quarters[i], 'characteristics': metrics}
+                    
+                    current_phase = {
+                        'start_period': stats['period'],
+                        'characteristics': stats,
+                        'periods': [stats['period']]
+                    }
+                else:
+                    current_phase['periods'].append(stats['period'])
         
         if current_phase:
-            current_phase['end'] = quarters[-1]
+            current_phase['end_period'] = quarterly_stats[-1]['period']
             phases.append(current_phase)
         
-        for phase in phases:
-            char = phase['characteristics']
-            if char['discovery_rate'] > 0.7:
-                phase['type'] = 'Exploration Phase'
-                phase['description'] = 'High discovery rate, exploring new music'
-            elif char['artist_diversity'] < 0.3:
-                phase['type'] = 'Focused Phase'
-                phase['description'] = 'Low diversity, focused on specific artists'
-            elif char['listening_intensity'] > 100:
-                phase['type'] = 'Intensive Phase'
-                phase['description'] = 'High listening volume period'
-            else:
-                phase['type'] = 'Stable Phase'
-                phase['description'] = 'Balanced listening patterns'
+        return phases
+    
+    def _calculate_diversity_index(self, series) -> float:
+        """Calculate Simpson's diversity index."""
+        counts = series.value_counts()
+        total = len(series)
+        return 1 - sum((count/total)**2 for count in counts) if total > 0 else 0
+    
+    def _estimate_genres(self, data) -> List[str]:
+        """Estimate genres based on artist patterns (placeholder)."""
+        # This is a simplified genre estimation
+        top_artists = data['artist'].value_counts().head(3).index.tolist()
+        return top_artists  # Placeholder
+    
+    def _calculate_avg_session_length(self, data) -> float:
+        """Calculate average session length for given data."""
+        sessions = []
+        current_session = []
         
-        return {
-            'phases': phases,
-            'total_phases': len(phases),
-            'current_phase': phases[-1] if phases else None,
-            'phase_summary': {phase['type']: len([p for p in phases if p['type'] == phase['type']]) for phase in phases}
-        }     
+        for i, row in data.iterrows():
+            if not current_session:
+                current_session = [row['datetime']]
+            else:
+                time_diff = (row['datetime'] - current_session[-1]).total_seconds() / 3600
+                if time_diff > 1:  # New session if gap > 1 hour
+                    sessions.append(len(current_session))
+                    current_session = [row['datetime']]
+                else:
+                    current_session.append(row['datetime'])
+        
+        if current_session:
+            sessions.append(len(current_session))
+        
+        return np.mean(sessions) if sessions else 0     

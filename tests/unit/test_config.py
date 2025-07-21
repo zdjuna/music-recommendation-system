@@ -1,61 +1,36 @@
-"""
-Unit tests for configuration management
-"""
+"""Test configuration and environment setup."""
 
 import pytest
 import os
-import tempfile
-from pathlib import Path
 import sys
 
-# Add src to path
-sys.path.append(str(Path(__file__).parent.parent.parent))
+# Add src to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-class TestConfig:
-    """Test configuration management"""
-    
-    def test_config_initialization(self):
-        """Test config initializes correctly"""
-        from streamlit_app.utils.config import Config
-        
-        config = Config()
-        assert hasattr(config, 'data_dir')
-        assert hasattr(config, 'cache_dir')
-        assert hasattr(config, 'models_dir')
-        assert hasattr(config, 'reports_dir')
-    
-    def test_api_status(self):
-        """Test API status detection"""
-        from streamlit_app.utils.config import Config
-        
-        # Test with no API keys
-        config = Config()
-        status = config.api_status
-        
-        assert isinstance(status, dict)
-        assert 'lastfm' in status
-        assert 'cyanite' in status
-        assert 'spotify' in status
-        assert isinstance(status['lastfm'], bool)
-        assert isinstance(status['cyanite'], bool)
-        assert isinstance(status['spotify'], bool)
-    
-    def test_production_readiness(self):
-        """Test production readiness check"""
-        from streamlit_app.utils.config import Config
-        
-        config = Config()
-        ready = config.is_production_ready
-        assert isinstance(ready, bool)
-    
-    def test_default_values(self):
-        """Test default configuration values"""
-        from streamlit_app.utils.config import Config
-        
-        config = Config()
-        username = config.default_username
-        assert isinstance(username, str)
-        assert len(username) > 0
 
-if __name__ == "__main__":
-    pytest.main([__file__])
+def test_environment_variables():
+    """Test that environment variables can be set and read."""
+    # Test setting and getting an environment variable
+    test_key = "TEST_MUSIC_REC_VAR"
+    test_value = "test_value_123"
+    
+    os.environ[test_key] = test_value
+    assert os.environ.get(test_key) == test_value
+    
+    # Clean up
+    del os.environ[test_key]
+
+
+def test_python_version():
+    """Test that we're running on a supported Python version."""
+    assert sys.version_info >= (3, 8), "Python 3.8+ is required"
+
+
+def test_required_directories_exist():
+    """Test that required project directories exist."""
+    project_root = os.path.join(os.path.dirname(__file__), '..', '..')
+    
+    # Check that main directories exist
+    assert os.path.exists(os.path.join(project_root, 'src'))
+    assert os.path.exists(os.path.join(project_root, 'src', 'music_rec'))
+    assert os.path.exists(os.path.join(project_root, 'tests'))

@@ -13,6 +13,7 @@ sys.path.append(str(Path(__file__).parent))
 from streamlit_app.utils.config import config
 from streamlit_app.pages.dashboard import show_dashboard
 from streamlit_app.pages.playlist_manager import show_playlist_manager
+from streamlit_app.pages.temporal_analytics import show_temporal_analytics
 
 # Configure page
 st.set_page_config(
@@ -192,6 +193,7 @@ def main():
     nav_options = [
         "🏠 Dashboard",
         "🎵 Playlists", 
+        "📈 Temporal Analytics",
         "🎯 Recommendations",
         "📊 Data Management",
         "⚡ Real-Time Monitoring",
@@ -221,6 +223,8 @@ def main():
         show_dashboard()
     elif page == "🎵 Playlists":
         show_playlist_manager()
+    elif page == "📈 Temporal Analytics":
+        show_temporal_analytics()
     elif page == "🎯 Recommendations":
         show_enhanced_recommendations()
     elif page == "📊 Data Management":

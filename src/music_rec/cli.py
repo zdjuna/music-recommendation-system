@@ -8,6 +8,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 
 import click
 from dotenv import load_dotenv
@@ -1267,4 +1268,4 @@ def show_enrichment_quality(quality_analysis: dict):
             console.print(f"  • {rec}")
 
 if __name__ == '__main__':
-    cli() 
+    cli()  

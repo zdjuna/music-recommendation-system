@@ -197,7 +197,7 @@ class DiscogsEnricher:
                 mood_scores[mood] = score
         
         if mood_scores:
-            return max(mood_scores, key=mood_scores.get)
+            return max(mood_scores.keys(), key=lambda k: mood_scores[k])
         return 'neutral'
     
     def enrich_track(self, artist: str, title: str) -> Optional[Dict]:
@@ -261,7 +261,7 @@ class DiscogsEnricher:
         self.logger.info(f"Successfully enriched '{artist}' - '{title}' with Discogs data")
         return enriched_data
     
-    def enrich_tracks_batch(self, tracks: List[Dict[str, str]], max_tracks: int = None) -> Dict[str, Dict]:
+    def enrich_tracks_batch(self, tracks: List[Dict[str, str]], max_tracks: Optional[int] = None) -> Dict[str, Dict]:
         """
         Enrich multiple tracks with Discogs data
         
@@ -331,4 +331,4 @@ if __name__ == "__main__":
             print(f"   Styles: {result.get('discogs_styles', [])}")
             print(f"   Mood: {result.get('simplified_mood')}")
         else:
-            print(f"\n❌ Not found: {track['artist']} - {track['title']}") 
+            print(f"\n❌ Not found: {track['artist']} - {track['title']}")  

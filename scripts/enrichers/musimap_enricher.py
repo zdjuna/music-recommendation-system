@@ -96,7 +96,7 @@ class MusimapEnricher:
                     'limit': 10
                 }
                 
-                response = self.session.get(search_url, params=params)
+                response = self.session.get(search_url, params=params, timeout=30)
                 
                 if response.status_code == 429:
                     retry_after = int(response.headers.get('Retry-After', 1))
@@ -133,13 +133,13 @@ class MusimapEnricher:
         analysis_url = f"{self.config.base_url}/tracks/{track_id}/analysis"
         
         try:
-            response = self.session.get(analysis_url)
+            response = self.session.get(analysis_url, timeout=30)
             
             if response.status_code == 429:
                 retry_after = int(response.headers.get('Retry-After', 1))
                 self.logger.warning(f"Rate limited, waiting {retry_after} seconds")
                 time.sleep(retry_after)
-                response = self.session.get(analysis_url)
+                response = self.session.get(analysis_url, timeout=30)
             
             response.raise_for_status()
             data = response.json()
@@ -366,4 +366,4 @@ def test_musimap_enricher():
             print("❌ Failed to enrich")
 
 if __name__ == "__main__":
-    test_musimap_enricher()  
+    test_musimap_enricher()

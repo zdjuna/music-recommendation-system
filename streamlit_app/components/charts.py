@@ -120,7 +120,8 @@ def create_listening_heatmap(df: pd.DataFrame) -> go.Figure:
     df['day_of_week'] = df['timestamp'].dt.day_name()
     
     # Create heatmap data
-    heatmap_data = df.groupby(['day_of_week', 'hour']).size().reset_index(name='count')
+    heatmap_data = df.groupby(['day_of_week', 'hour']).size().reset_index()
+    heatmap_data.columns = ['day_of_week', 'hour', 'count']
     
     # Ensure all days and hours are represented
     day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -160,7 +161,8 @@ def create_artist_discovery_timeline(df: pd.DataFrame) -> go.Figure:
     first_plays['year_month'] = first_plays['timestamp'].dt.to_period('M')
     
     # Count new artists per month
-    discovery_counts = first_plays.groupby('year_month').size().reset_index(name='new_artists')
+    discovery_counts = first_plays.groupby('year_month').size().reset_index()
+    discovery_counts.columns = ['year_month', 'new_artists']
     discovery_counts['year_month'] = discovery_counts['year_month'].astype(str)
     
     fig = go.Figure()

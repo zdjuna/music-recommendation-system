@@ -3,6 +3,7 @@ System status dashboard component
 """
 
 import streamlit as st
+import sys
 from pathlib import Path
 from ..utils.config import config
 from ..models.database import db
@@ -82,7 +83,7 @@ def render_quick_actions():
             with st.spinner("Testing Spotify connection..."):
                 try:
                     import subprocess
-                    result = subprocess.run(['python', 'tests/integration/test_spotify.py'], 
+                    result = subprocess.run([sys.executable, 'tests/integration/test_spotify.py'], 
                                           capture_output=True, text=True, timeout=30)
                     if "✅" in result.stdout:
                         st.success("Spotify connection working!")
@@ -98,7 +99,7 @@ def render_quick_actions():
             with st.spinner("Testing LastFM integration..."):
                 try:
                     import subprocess
-                    result = subprocess.run(['python', 'tests/integration/test_lastfm.py'], 
+                    result = subprocess.run([sys.executable, 'tests/integration/test_lastfm.py'], 
                                           capture_output=True, text=True, timeout=30)
                     if "✨" in result.stdout:
                         st.success("LastFM integration working!")
@@ -119,7 +120,7 @@ def render_quick_actions():
                     if csv_file.exists():
                         db.import_csv_data(username, csv_file)
                         st.success("Data imported successfully!")
-                        st.experimental_rerun()
+                        st.rerun()
                     else:
                         st.error("No scrobbles data found to import")
                 except Exception as e:
@@ -145,6 +146,6 @@ def render_welcome_message():
     col1, col2 = st.columns(2)
     with col1:
         if st.button("🔧 Go to Data Management", key="goto_data_mgmt_welcome"):
-            st.experimental_set_query_params(page="data")
+            st.query_params.page = "data"
     with col2:
         st.markdown("[📖 Setup Guide](docs/QUICK_START.md)")
