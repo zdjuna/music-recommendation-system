@@ -220,9 +220,10 @@ class AIInsightGenerator:
         
         genre_evolution = patterns.get('genre_evolution', {})
         seasonal = patterns.get('seasonal', {})
-        summary = patterns.get('summary_stats', {})
-        yearly_evolution = patterns.get('yearly_evolution', {})
         musical_phases = patterns.get('musical_phases', {})
+        year_over_year = patterns.get('year_over_year_evolution', {})
+        yearly_evolution = patterns.get('yearly_evolution', {})
+        summary = patterns.get('summary_stats', {})
         
         prompt = f"""
         Analyze how this person's musical taste has evolved over time:
@@ -515,4 +516,4 @@ Session Length: {temporal.get('average_session_length', 0)} tracks per listening
         Be engaging and tell the story of their musical evolution. Focus on meaningful patterns and what they reveal about the person's growth and changes over time.
         """
         
-        return prompt.strip()   
+        return prompt.strip()       

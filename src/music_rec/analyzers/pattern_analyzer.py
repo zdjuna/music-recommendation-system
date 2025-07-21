@@ -87,6 +87,8 @@ class PatternAnalyzer:
             'repetition': self.analyze_repetition_patterns(),
             'seasonal': self.analyze_seasonal_patterns(),
             'yearly_evolution': self.analyze_yearly_evolution(),
+            'enhanced_musical_phases': self.analyze_musical_phases(),
+            'year_over_year_evolution': self.analyze_year_over_year_evolution(),
             'summary_stats': self.get_summary_statistics()
         }
         
@@ -261,8 +263,9 @@ class PatternAnalyzer:
                                          self.data['datetime'].dt.month]).size()
         
         # Intensity metrics
-        high_activity_days = len(daily_plays[daily_plays > daily_plays.quantile(0.8)])
-        low_activity_days = len(daily_plays[daily_plays < daily_plays.quantile(0.2)])
+        daily_plays_series = daily_plays.reset_index(drop=True) if hasattr(daily_plays, 'reset_index') else daily_plays
+        high_activity_days = len(daily_plays_series[daily_plays_series > daily_plays_series.quantile(0.8)])
+        low_activity_days = len(daily_plays_series[daily_plays_series < daily_plays_series.quantile(0.2)])
         
         # Convert tuple keys to strings for JSON serialization
         recent_trend_dict = {}
@@ -270,12 +273,12 @@ class PatternAnalyzer:
             recent_trend_dict[f"{int(year)}-{int(month):02d}"] = int(count)
         
         return {
-            'avg_daily_plays': round(float(daily_plays.mean()), 1),
-            'max_daily_plays': int(daily_plays.max()),
+            'avg_daily_plays': round(float(daily_plays_series.mean()), 1),
+            'max_daily_plays': int(daily_plays_series.max()),
             'avg_monthly_plays': round(float(monthly_plays.mean()), 1),
             'high_activity_days': high_activity_days,
             'low_activity_days': low_activity_days,
-            'listening_variability': round(float(daily_plays.std()), 1),
+            'listening_variability': round(float(daily_plays_series.std()), 1),
             'most_active_month': f"{int(monthly_plays.idxmax()[0])}-{int(monthly_plays.idxmax()[1]):02d}" if not monthly_plays.empty else None,
             'recent_trend': recent_trend_dict
         }
@@ -456,6 +459,183 @@ class PatternAnalyzer:
         
         return insights
     
+    def analyze_musical_phases(self) -> Dict:
+        """Detect musical phases based on listening pattern changes"""
+        if self.data.empty:
+            return {}
+        
+        self.data['quarter'] = self.data['datetime'].dt.to_period('Q')
+        quarterly_data = []
+        
+        for quarter in self.data['quarter'].unique():
+            quarter_data = self.data[self.data['quarter'] == quarter]
+            
+            artist_diversity = quarter_data['artist'].nunique() / len(quarter_data) if len(quarter_data) > 0 else 0
+            genre_diversity = quarter_data['genre'].nunique() / len(quarter_data) if 'genre' in quarter_data.columns and len(quarter_data) > 0 else 0
+            listening_intensity = len(quarter_data)
+            
+            # Top genres distribution
+            top_genres = quarter_data['genre'].value_counts().head(3).to_dict() if 'genre' in quarter_data.columns else {}
+            
+            quarterly_data.append({
+                'quarter': str(quarter),
+                'artist_diversity': round(artist_diversity, 3),
+                'genre_diversity': round(genre_diversity, 3),
+                'listening_intensity': listening_intensity,
+                'top_genres': top_genres,
+                'unique_artists': quarter_data['artist'].nunique(),
+                'total_plays': len(quarter_data)
+            })
+        
+        phases = []
+        if len(quarterly_data) > 1:
+            for i in range(1, len(quarterly_data)):
+                prev = quarterly_data[i-1]
+                curr = quarterly_data[i]
+                
+                diversity_change = abs(curr['artist_diversity'] - prev['artist_diversity'])
+                intensity_change = abs(curr['listening_intensity'] - prev['listening_intensity']) / max(prev['listening_intensity'], 1)
+                
+                if diversity_change > 0.1 or intensity_change > 0.3:
+                    phase_type = "Discovery" if curr['artist_diversity'] > prev['artist_diversity'] else "Consolidation"
+                    if intensity_change > 0.5:
+                        phase_type = "High Activity" if curr['listening_intensity'] > prev['listening_intensity'] else "Low Activity"
+                    
+                    phases.append({
+                        'quarter': curr['quarter'],
+                        'phase_type': phase_type,
+                        'diversity_change': round(diversity_change, 3),
+                        'intensity_change': round(intensity_change, 3)
+                    })
+        
+        return {
+            'quarterly_metrics': quarterly_data,
+            'detected_phases': phases,
+            'total_phases': len(phases),
+            'phase_summary': self._summarize_phases(phases)
+        }
+    
+    def _summarize_phases(self, phases: list) -> Dict:
+        """Summarize detected musical phases"""
+        if not phases:
+            return {'dominant_pattern': 'Stable', 'phase_count': 0}
+        
+        phase_types = [p['phase_type'] for p in phases]
+        from collections import Counter
+        phase_counts = Counter(phase_types)
+        
+        return {
+            'dominant_pattern': phase_counts.most_common(1)[0][0] if phase_counts else 'Stable',
+            'phase_count': len(phases),
+            'phase_distribution': dict(phase_counts)
+        }
+    
+    def analyze_year_over_year_evolution(self) -> Dict:
+        """Analyze year-over-year changes in listening patterns"""
+        if self.data.empty:
+            return {}
+        
+        self.data['year'] = self.data['datetime'].dt.year
+        yearly_data = []
+        
+        for year in sorted(self.data['year'].unique()):
+            year_data = self.data[self.data['year'] == year]
+            
+            metrics = {
+                'year': int(year),
+                'total_plays': len(year_data),
+                'unique_artists': year_data['artist'].nunique(),
+                'unique_tracks': year_data.drop_duplicates(['artist', 'track']).shape[0],
+                'artist_diversity_index': year_data['artist'].nunique() / len(year_data) if len(year_data) > 0 else 0,
+                'top_artist': year_data['artist'].value_counts().index[0] if len(year_data) > 0 else None,
+                'top_artist_plays': year_data['artist'].value_counts().iloc[0] if len(year_data) > 0 else 0,
+                'avg_daily_plays': len(year_data) / 365,
+                'discovery_rate': len(year_data.groupby('artist')['datetime'].min()) / len(year_data) if len(year_data) > 0 else 0
+            }
+            
+            if 'genre' in year_data.columns:
+                metrics.update({
+                    'unique_genres': year_data['genre'].nunique(),
+                    'genre_diversity_index': year_data['genre'].nunique() / len(year_data) if len(year_data) > 0 else 0,
+                    'top_genre': year_data['genre'].value_counts().index[0] if len(year_data) > 0 else None
+                })
+            
+            yearly_data.append(metrics)
+        
+        evolution_trends = []
+        if len(yearly_data) > 1:
+            for i in range(1, len(yearly_data)):
+                prev_year = yearly_data[i-1]
+                curr_year = yearly_data[i]
+                
+                trends = {
+                    'year_transition': f"{prev_year['year']}-{curr_year['year']}",
+                    'plays_change': curr_year['total_plays'] - prev_year['total_plays'],
+                    'plays_change_pct': ((curr_year['total_plays'] - prev_year['total_plays']) / prev_year['total_plays'] * 100) if prev_year['total_plays'] > 0 else 0,
+                    'artist_diversity_change': curr_year['artist_diversity_index'] - prev_year['artist_diversity_index'],
+                    'new_artists_discovered': curr_year['unique_artists'] - prev_year['unique_artists'],
+                    'listening_intensity_change': curr_year['avg_daily_plays'] - prev_year['avg_daily_plays']
+                }
+                
+                if trends['plays_change_pct'] > 10:
+                    trends['trend'] = 'Increasing'
+                elif trends['plays_change_pct'] < -10:
+                    trends['trend'] = 'Decreasing'
+                else:
+                    trends['trend'] = 'Stable'
+                
+                evolution_trends.append(trends)
+        
+        return {
+            'yearly_metrics': yearly_data,
+            'evolution_trends': evolution_trends,
+            'total_years': len(yearly_data),
+            'overall_growth': self._calculate_overall_growth(yearly_data),
+            'listening_evolution_summary': self._summarize_evolution(evolution_trends)
+        }
+    
+    def _calculate_overall_growth(self, yearly_data: list) -> Dict:
+        """Calculate overall growth metrics across all years"""
+        if len(yearly_data) < 2:
+            return {}
+        
+        first_year = yearly_data[0]
+        last_year = yearly_data[-1]
+        years_span = last_year['year'] - first_year['year']
+        
+        return {
+            'total_plays_growth': last_year['total_plays'] - first_year['total_plays'],
+            'total_plays_growth_pct': ((last_year['total_plays'] - first_year['total_plays']) / first_year['total_plays'] * 100) if first_year['total_plays'] > 0 else 0,
+            'artist_diversity_evolution': last_year['artist_diversity_index'] - first_year['artist_diversity_index'],
+            'years_analyzed': years_span,
+            'avg_annual_growth': ((last_year['total_plays'] - first_year['total_plays']) / years_span) if years_span > 0 else 0
+        }
+    
+    def _summarize_evolution(self, evolution_trends: list) -> Dict:
+        """Summarize evolution patterns"""
+        if not evolution_trends:
+            return {'pattern': 'Insufficient data', 'stability': 'Unknown'}
+        
+        trends = [t['trend'] for t in evolution_trends]
+        from collections import Counter
+        trend_counts = Counter(trends)
+        
+        if trend_counts['Increasing'] > trend_counts['Decreasing']:
+            pattern = 'Growing'
+        elif trend_counts['Decreasing'] > trend_counts['Increasing']:
+            pattern = 'Declining'
+        else:
+            pattern = 'Fluctuating'
+        
+        stable_years = trend_counts.get('Stable', 0)
+        stability = 'High' if stable_years > len(trends) / 2 else 'Low'
+        
+        return {
+            'pattern': pattern,
+            'stability': stability,
+            'trend_distribution': dict(trend_counts)
+        }
+    
     def analyze_yearly_evolution(self) -> Dict:
         """Analyze year-over-year changes in listening patterns."""
         if self.data.empty:
@@ -502,7 +682,7 @@ class PatternAnalyzer:
         
         for quarter in sorted(self.data['year_quarter'].unique()):
             quarter_data = self.data[self.data['year_quarter'] == quarter]
-            if len(quarter_data) < 10:  # Skip quarters with too little data
+            if len(quarter_data) < 10:
                 continue
                 
             stats = {
@@ -556,9 +736,8 @@ class PatternAnalyzer:
     
     def _estimate_genres(self, data) -> List[str]:
         """Estimate genres based on artist patterns (placeholder)."""
-        # This is a simplified genre estimation
         top_artists = data['artist'].value_counts().head(3).index.tolist()
-        return top_artists  # Placeholder
+        return top_artists
     
     def _calculate_avg_session_length(self, data) -> float:
         """Calculate average session length for given data."""
@@ -570,7 +749,7 @@ class PatternAnalyzer:
                 current_session = [row['datetime']]
             else:
                 time_diff = (row['datetime'] - current_session[-1]).total_seconds() / 3600
-                if time_diff > 1:  # New session if gap > 1 hour
+                if time_diff > 1:
                     sessions.append(len(current_session))
                     current_session = [row['datetime']]
                 else:
@@ -579,4 +758,4 @@ class PatternAnalyzer:
         if current_session:
             sessions.append(len(current_session))
         
-        return np.mean(sessions) if sessions else 0     
+        return np.mean(sessions) if sessions else 0       
