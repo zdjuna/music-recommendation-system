@@ -13,6 +13,7 @@ sys.path.append(str(Path(__file__).parent))
 from streamlit_app.utils.config import config
 from streamlit_app.pages.dashboard import show_dashboard
 from streamlit_app.pages.playlist_manager import show_playlist_manager
+from streamlit_app.pages.recommendations import show_recommendations
 
 # Configure page
 st.set_page_config(
@@ -222,7 +223,7 @@ def main():
     elif page == "🎵 Playlists":
         show_playlist_manager()
     elif page == "🎯 Recommendations":
-        show_enhanced_recommendations()
+        show_recommendations()
     elif page == "📊 Data Management":
         show_data_management()
     elif page == "⚡ Real-Time Monitoring":
@@ -239,22 +240,6 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-def show_enhanced_recommendations():
-    """Enhanced recommendations page (placeholder)"""
-    st.header("🎯 Enhanced Music Recommendations")
-    st.info("🚧 This page is being migrated to the new modular architecture. Coming soon!")
-    
-    # Quick recommendation buttons
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("🎵 Quick Mix"):
-            st.success("Generating quick mix...")
-    with col2:
-        if st.button("🔍 Discovery"):
-            st.success("Generating discovery playlist...")
-    with col3:
-        if st.button("❤️ Favorites"):
-            st.success("Generating favorites mix...")
 
 def show_data_management():
     """Data management page (placeholder)"""
