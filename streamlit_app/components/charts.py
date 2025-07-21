@@ -120,7 +120,8 @@ def create_listening_heatmap(df: pd.DataFrame) -> go.Figure:
     df['day_of_week'] = df['timestamp'].dt.day_name()
     
     # Create heatmap data
-    heatmap_data = df.groupby(['day_of_week', 'hour']).size().reset_index(name='count')
+    heatmap_data = df.groupby(['day_of_week', 'hour']).size().reset_index()
+    heatmap_data.columns = ['day_of_week', 'hour', 'count']
     
     # Ensure all days and hours are represented
     day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -160,7 +161,8 @@ def create_artist_discovery_timeline(df: pd.DataFrame) -> go.Figure:
     first_plays['year_month'] = first_plays['timestamp'].dt.to_period('M')
     
     # Count new artists per month
-    discovery_counts = first_plays.groupby('year_month').size().reset_index(name='new_artists')
+    discovery_counts = first_plays.groupby('year_month').size().reset_index()
+    discovery_counts.columns = ['year_month', 'new_artists']
     discovery_counts['year_month'] = discovery_counts['year_month'].astype(str)
     
     fig = go.Figure()
@@ -181,6 +183,180 @@ def create_artist_discovery_timeline(df: pd.DataFrame) -> go.Figure:
         font=dict(family="Arial", size=12),
         height=400,
         showlegend=False
+    )
+    
+    return fig
+
+@st.cache_data(ttl=1800)
+def create_musical_phases_timeline(phases_data: dict) -> go.Figure:
+    """Create musical phases timeline visualization"""
+    if not phases_data or 'quarterly_metrics' not in phases_data:
+        return go.Figure()
+    
+    quarterly_metrics = phases_data['quarterly_metrics']
+    detected_phases = phases_data.get('detected_phases', [])
+    
+    if not quarterly_metrics:
+        return go.Figure()
+    
+    quarters = [q['quarter'] for q in quarterly_metrics]
+    artist_diversity = [q['artist_diversity'] for q in quarterly_metrics]
+    listening_intensity = [q['listening_intensity'] for q in quarterly_metrics]
+    
+    fig = make_subplots(
+        rows=2, cols=1,
+        subplot_titles=('Artist Diversity Index', 'Listening Intensity'),
+        vertical_spacing=0.1
+    )
+    
+    fig.add_trace(
+        go.Scatter(
+            x=quarters,
+            y=artist_diversity,
+            mode='lines+markers',
+            name='Artist Diversity',
+            line=dict(color='#3498db', width=3),
+            marker=dict(size=8)
+        ),
+        row=1, col=1
+    )
+    
+    # Listening intensity line
+    fig.add_trace(
+        go.Scatter(
+            x=quarters,
+            y=listening_intensity,
+            mode='lines+markers',
+            name='Listening Intensity',
+            line=dict(color='#e74c3c', width=3),
+            marker=dict(size=8)
+        ),
+        row=2, col=1
+    )
+    
+    for phase in detected_phases:
+        quarter = phase['quarter']
+        phase_type = phase['phase_type']
+        
+        fig.add_vline(
+            x=quarter,
+            line_dash="dash",
+            line_color="orange",
+            annotation_text=phase_type,
+            annotation_position="top"
+        )
+    
+    fig.update_layout(
+        title="🎭 Musical Phases Detection",
+        height=600,
+        font=dict(family="Arial", size=12),
+        showlegend=True
+    )
+    
+    return fig
+
+@st.cache_data(ttl=1800)
+def create_year_over_year_comparison(evolution_data: dict) -> go.Figure:
+    """Create year-over-year comparison chart"""
+    if not evolution_data or 'yearly_metrics' not in evolution_data:
+        return go.Figure()
+    
+    yearly_metrics = evolution_data['yearly_metrics']
+    
+    if len(yearly_metrics) < 2:
+        return go.Figure()
+    
+    years = [y['year'] for y in yearly_metrics]
+    total_plays = [y['total_plays'] for y in yearly_metrics]
+    unique_artists = [y['unique_artists'] for y in yearly_metrics]
+    artist_diversity = [y['artist_diversity_index'] for y in yearly_metrics]
+    
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=('Total Plays', 'Unique Artists', 'Artist Diversity Index', 'Discovery Rate'),
+        vertical_spacing=0.1,
+        horizontal_spacing=0.1
+    )
+    
+    fig.add_trace(
+        go.Bar(x=years, y=total_plays, name='Total Plays', marker_color='#3498db'),
+        row=1, col=1
+    )
+    
+    fig.add_trace(
+        go.Bar(x=years, y=unique_artists, name='Unique Artists', marker_color='#2ecc71'),
+        row=1, col=2
+    )
+    
+    fig.add_trace(
+        go.Scatter(x=years, y=artist_diversity, mode='lines+markers', 
+                  name='Diversity Index', line=dict(color='#e74c3c', width=3)),
+        row=2, col=1
+    )
+    
+    discovery_rates = [y.get('discovery_rate', 0) for y in yearly_metrics]
+    fig.add_trace(
+        go.Scatter(x=years, y=discovery_rates, mode='lines+markers',
+                  name='Discovery Rate', line=dict(color='#f39c12', width=3)),
+        row=2, col=2
+    )
+    
+    fig.update_layout(
+        title="📊 Year-over-Year Evolution",
+        height=600,
+        font=dict(family="Arial", size=12),
+        showlegend=False
+    )
+    
+    return fig
+
+@st.cache_data(ttl=1800)
+def create_listening_evolution_chart(evolution_data: dict) -> go.Figure:
+    """Create listening evolution trend chart"""
+    if not evolution_data or 'evolution_trends' not in evolution_data:
+        return go.Figure()
+    
+    trends = evolution_data['evolution_trends']
+    
+    if not trends:
+        return go.Figure()
+    
+    transitions = [t['year_transition'] for t in trends]
+    plays_changes = [t['plays_change_pct'] for t in trends]
+    diversity_changes = [t['artist_diversity_change'] * 100 for t in trends]  # Convert to percentage
+    
+    fig = go.Figure()
+    
+    fig.add_trace(go.Bar(
+        x=transitions,
+        y=plays_changes,
+        name='Plays Change %',
+        marker_color=['green' if x > 0 else 'red' for x in plays_changes],
+        text=[f"{x:.1f}%" for x in plays_changes],
+        textposition='outside'
+    ))
+    
+    fig.add_trace(go.Scatter(
+        x=transitions,
+        y=diversity_changes,
+        mode='lines+markers',
+        name='Diversity Change %',
+        yaxis='y2',
+        line=dict(color='orange', width=3),
+        marker=dict(size=10)
+    ))
+    
+    fig.update_layout(
+        title="📈 Listening Evolution Trends",
+        xaxis_title="Year Transition",
+        yaxis_title="Plays Change (%)",
+        yaxis2=dict(
+            title="Diversity Change (%)",
+            overlaying='y',
+            side='right'
+        ),
+        height=400,
+        font=dict(family="Arial", size=12)
     )
     
     return fig

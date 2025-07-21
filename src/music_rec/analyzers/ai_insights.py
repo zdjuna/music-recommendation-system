@@ -219,6 +219,8 @@ class AIInsightGenerator:
         
         genre_evolution = patterns.get('genre_evolution', {})
         seasonal = patterns.get('seasonal', {})
+        musical_phases = patterns.get('musical_phases', {})
+        year_over_year = patterns.get('year_over_year_evolution', {})
         summary = patterns.get('summary_stats', {})
         
         prompt = f"""
@@ -279,13 +281,16 @@ class AIInsightGenerator:
             # System prompt + user prompt combined for Responses API
             full_input = f"You are a music psychology expert who provides insightful, personal analysis of listening patterns.\n\n{prompt}"
             
-            response = self.openai_client.responses.create(
-                model="gpt-4.1",
-                input=full_input,
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a music psychology expert who provides insightful, personal analysis of listening patterns."},
+                    {"role": "user", "content": prompt}
+                ],
                 max_tokens=max_tokens,
                 temperature=0.7
             )
-            return response.output.content.strip()
+            return response.choices[0].message.content.strip()
         except Exception as e:
             logger.error(f"OpenAI API error: {e}")
             return f"AI analysis temporarily unavailable: {str(e)}"
@@ -457,4 +462,4 @@ Session Length: {temporal.get('average_session_length', 0)} tracks per listening
         for task in tasks:
             results.update(task)
         
-        return results 
+        return results    
