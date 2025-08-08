@@ -5,6 +5,10 @@
 import streamlit as st
 import sys
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file before anything else
+load_dotenv()
 
 # Add current directory to path for imports
 sys.path.append(str(Path(__file__).parent))

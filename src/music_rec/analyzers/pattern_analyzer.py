@@ -81,14 +81,11 @@ class PatternAnalyzer:
             'discovery': self.analyze_discovery_patterns(),
             'artist_loyalty': self.analyze_artist_patterns(),
             'genre_evolution': self.analyze_genre_evolution(),
-            'yearly_evolution': self.analyze_yearly_evolution(),
-            'musical_phases': self.detect_musical_phases(),
+            'yearly_evolution': self.analyze_year_over_year_evolution(),
+            'musical_phases': self.analyze_musical_phases(),
             'listening_intensity': self.analyze_listening_intensity(),
             'repetition': self.analyze_repetition_patterns(),
             'seasonal': self.analyze_seasonal_patterns(),
-            'yearly_evolution': self.analyze_yearly_evolution(),
-            'enhanced_musical_phases': self.analyze_musical_phases(),
-            'year_over_year_evolution': self.analyze_year_over_year_evolution(),
             'summary_stats': self.get_summary_statistics()
         }
         
@@ -585,13 +582,20 @@ class PatternAnalyzer:
                     trends['trend'] = 'Stable'
                 
                 evolution_trends.append(trends)
+
+        if not yearly_data:
+            most_active_year = None
+        else:
+            yearly_plays = {m['year']: m['total_plays'] for m in yearly_data}
+            most_active_year = max(yearly_plays, key=yearly_plays.get)
         
         return {
             'yearly_metrics': yearly_data,
             'evolution_trends': evolution_trends,
             'total_years': len(yearly_data),
             'overall_growth': self._calculate_overall_growth(yearly_data),
-            'listening_evolution_summary': self._summarize_evolution(evolution_trends)
+            'listening_evolution_summary': self._summarize_evolution(evolution_trends),
+            'most_active_year': most_active_year
         }
     
     def _calculate_overall_growth(self, yearly_data: list) -> Dict:
